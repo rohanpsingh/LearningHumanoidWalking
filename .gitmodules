@@ -1,0 +1,6 @@
+[submodule "models/jvrc_mj_description"]
+	path = models/jvrc_mj_description
+	url = git@github.com:rohanpsingh/jvrc_mj_description.git
+[submodule "models/cassie_mj_description"]
+	path = models/cassie_mj_description
+	url = git@github.com:rohanpsingh/cassie_mj_description.git
