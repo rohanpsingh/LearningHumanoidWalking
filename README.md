@@ -1,6 +1,6 @@
 # RL-for-humanoids
 
-## Requirements (Incomplete):
+## Requirements:
 - Python version: 3.7.11  
 - Pytorch (CPU only): `$ conda install pytorch torchvision torchaudio cpuonly -c pytorch`
 - pip install:
@@ -11,15 +11,23 @@
 
 ## Usage:
 
-### **To train using custom PPO implementation:** 
+Environment names supported:  
 
-```sh
+| Task Description      | Environment name |
+| ----------- | ----------- |
+| Basic Walking Task   | 'jvrc_walk' |
+| Stepping Task (using footsteps)  | 'jvrc_step' |
+
+
+### **To train:** 
+
+```
 $ python run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_cpu_procs> --env <name_of_environment>
 ```  
 
 
-### **To play a trained policy:** 
+### **To play:** 
 
-```sh
+```
 $ python run_experiment.py eval --path <path_to_exp_dir>
 ```
