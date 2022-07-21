@@ -1,5 +1,15 @@
 # RL-for-humanoids
 
+## Requirements (Incomplete):
+- Python version: 3.7.11  
+- Pytorch (CPU only): `$ conda install pytorch torchvision torchaudio cpuonly -c pytorch`
+- pip install:
+  - mujoco==2.1.5
+  - mujoco-python-viewer
+  - ray
+  - transforms3d
+
+## Usage:
 
 ### **To train using custom PPO implementation:** 
 
