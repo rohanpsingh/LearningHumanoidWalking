@@ -4,13 +4,11 @@ import transforms3d as tf3
 import collections
 
 from tasks import stepping_task
-from models import JVRC_DESCRIPTION_PATH
-from models import JVRC_PD_GAINS_PATH
 from envs.common import mujoco_env
 from envs.common import robot_interface
 from envs.jvrc import robot
 
-JVRC_DESCRIPTION_PATH="models/jvrc_mj_description/xml/jvrc1_terrain.xml"
+JVRC_DESCRIPTION_PATH="models/jvrc_mj_description/xml/jvrc1_boxes.xml"
 JVRC_PD_GAINS_PATH="models/jvrc_mj_description/pdgains/PDgains_sim.dat"
 
 class JvrcStepEnv(mujoco_env.MujocoEnv):

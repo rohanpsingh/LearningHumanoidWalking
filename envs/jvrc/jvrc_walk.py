@@ -4,8 +4,6 @@ import transforms3d as tf3
 import collections
 
 from tasks import walking_task
-from models import JVRC_DESCRIPTION_PATH
-from models import JVRC_PD_GAINS_PATH
 from envs.common import mujoco_env
 from envs.common import robot_interface
 from envs.jvrc import robot
