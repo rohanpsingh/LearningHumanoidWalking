@@ -18,6 +18,8 @@ from rl.utils.eval import EvalProcessClass
 def import_env(env_name_str):
     if env_name_str=='jvrc_walk':
         from envs.jvrc import JvrcWalkEnv as Env
+    elif env_name_str=='jvrc_step':
+        from envs.jvrc import JvrcStepEnv as Env
     else:
         raise Exception("Check env name!")
     return Env

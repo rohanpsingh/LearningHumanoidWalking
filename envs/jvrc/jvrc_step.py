@@ -3,7 +3,7 @@ import numpy as np
 import transforms3d as tf3
 import collections
 
-from tasks import walking_task
+from tasks import stepping_task
 from models import JVRC_DESCRIPTION_PATH
 from models import JVRC_PD_GAINS_PATH
 from envs.common import mujoco_env
@@ -13,7 +13,7 @@ from envs.jvrc import robot
 JVRC_DESCRIPTION_PATH="models/jvrc_mj_description/xml/jvrc1_terrain.xml"
 JVRC_PD_GAINS_PATH="models/jvrc_mj_description/pdgains/PDgains_sim.dat"
 
-class JvrcWalkEnv(mujoco_env.MujocoEnv):
+class JvrcStepEnv(mujoco_env.MujocoEnv):
     def __init__(self):
         sim_dt = 0.0025
         control_dt = 0.025
@@ -37,12 +37,13 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         # set up interface
         self.interface = robot_interface.RobotInterface(self.model, self.data, 'R_ANKLE_P_S', 'L_ANKLE_P_S')
         # set up task
-        self.task = walking_task.WalkingTask(client=self.interface,
-                                             dt=control_dt,
-                                             neutral_foot_orient=np.array([1, 0, 0, 0]),
-                                             root_body='PELVIS_S',
-                                             lfoot_body='L_ANKLE_P_S',
-                                             rfoot_body='R_ANKLE_P_S',
+        self.task = stepping_task.SteppingTask(client=self.interface,
+                                               dt=control_dt,
+                                               neutral_foot_orient=np.array([1, 0, 0, 0]),
+                                               root_body='PELVIS_S',
+                                               lfoot_body='L_ANKLE_P_S',
+                                               rfoot_body='R_ANKLE_P_S',
+                                               head_body='NECK_P_S',
         )
         # set goal height
         self.task._goal_height_ref = 0.80
@@ -62,7 +63,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
                         25, -26, -27, 28, -29, 30,   # motor vel [1]
                         19, -20, -21, 22, -23, 24,   # motor vel [2]
         ]
-        append_obs = [(len(base_mir_obs)+i) for i in range(3)]
+        append_obs = [(len(base_mir_obs)+i) for i in range(10)]
         self.robot.clock_inds = append_obs[0:2]
         self.robot.mirrored_obs = np.array(base_mir_obs + append_obs, copy=True).tolist()
         self.robot.mirrored_acts = [6, -7, -8, 9, -10, 11,
@@ -74,7 +75,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.action_space = np.zeros(action_space_size)
 
         # set observation space
-        self.base_obs_len = 34
+        self.base_obs_len = 41
         self.observation_space = np.zeros(self.base_obs_len)
         
         self.reset_model()
@@ -83,7 +84,11 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         # external state
         clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
                  np.cos(2 * np.pi * self.task._phase / self.task._period)]
-        ext_state = np.concatenate((clock, [self.task._goal_speed_ref]))
+        ext_state = np.concatenate((clock,
+                                    np.asarray(self.task._goal_steps_x).flatten(),
+                                    np.asarray(self.task._goal_steps_y).flatten(),
+                                    np.asarray(self.task._goal_steps_z).flatten(),
+                                    np.asarray(self.task._goal_steps_theta).flatten()))
 
         # internal state
         qpos = np.copy(self.interface.get_qpos())
@@ -142,10 +147,13 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
 
         # modify init state acc to task
         root_adr = self.interface.get_jnt_qposadr_by_name('root')[0]
+        self.init_qpos[root_adr+0] = np.random.uniform(-1, 1)
+        self.init_qpos[root_adr+1] = np.random.uniform(-1, 1)
         self.init_qpos[root_adr+2] = 0.81
+        self.init_qpos[root_adr+3:root_adr+7] = tf3.euler.euler2quat(0, np.random.uniform(-5, 5)*np.pi/180, np.random.uniform(-np.pi, np.pi))
         self.set_state(
-            np.asarray(self.init_qpos),
-            np.asarray(self.init_qvel)
+            self.init_qpos,
+            self.init_qvel
         )
         obs = self.get_obs()
         self.task.reset()
