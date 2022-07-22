@@ -2,7 +2,7 @@
 
 ## Requirements:
 - Python version: 3.7.11  
-- Pytorch (CPU only): `$ conda install pytorch torchvision torchaudio cpuonly -c pytorch`
+- [Pytorch](https://pytorch.org/)
 - pip install:
   - mujoco==2.1.5
   - mujoco-python-viewer
