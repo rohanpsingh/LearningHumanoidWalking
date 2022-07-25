@@ -37,7 +37,7 @@ def _calc_height_reward(self):
     deadzone_size = 0.01 + 0.05 * self._goal_speed_ref
     if error < deadzone_size:
         error = 0
-    return np.exp(-4*np.square(error))
+    return np.exp(-40*np.square(error))
 
 def _calc_heading_reward(self):
     # heading reward
