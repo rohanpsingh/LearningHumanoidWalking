@@ -5,7 +5,7 @@
 - [Pytorch](https://pytorch.org/)
 - pip install:
   - mujoco==2.1.5
-  - mujoco-python-viewer
+  - [mujoco-python-viewer](https://github.com/rohanpsingh/mujoco-python-viewer)
   - ray
   - transforms3d
 
@@ -19,14 +19,14 @@ Environment names supported:
 | Stepping Task (using footsteps)  | 'jvrc_step' |
 
 
-### **To train:** 
+#### **To train:** 
 
 ```
 $ python run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_cpu_procs> --env <name_of_environment>
 ```  
 
 
-### **To play:** 
+#### **To play:** 
 
 ```
 $ python run_experiment.py eval --path <path_to_exp_dir>
