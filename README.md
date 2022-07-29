@@ -34,9 +34,7 @@ For example, `debug_stepper.py` can be used with the `jvrc_step` environment.
 $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_dir>
 ```
 
----
-
-### **What you should see:**
+#### **What you should see:**
 
 *Ascending stairs:*  
 ![climb_up](https://user-images.githubusercontent.com/16384313/180697513-25796b1a-87e0-4ab2-9e5f-d86c58ebea36.gif)
@@ -46,3 +44,16 @@ $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_d
 
 *Walking on curves:*  
 ![curve](https://user-images.githubusercontent.com/16384313/180697266-7b44beb3-38bf-4494-b568-963919dc1106.gif)
+
+
+## Citation
+If you find this work useful in your own research:
+```
+@article{singh2022learning,
+  title={Learning Bipedal Walking On Planned Footsteps For Humanoid Robots},
+  author={Singh, Rohan Pratap and Benallegue, Mehdi and Morisawa, Mitsuharu and Cisneros, Rafael and Kanehiro, Fumio},
+  journal={arXiv preprint arXiv:2207.12644},
+  year={2022}
+}
+```
+
