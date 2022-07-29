@@ -26,10 +26,12 @@ $ python run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_
 ```  
 
 
-#### **To play:** 
+#### **To play:**
 
+We need to write a script for specific to each environment for evaluate.  
+For example, `debug_stepper.py` can be used with the `jvrc_step` environment.  
 ```
-$ python run_experiment.py eval --path <path_to_exp_dir>
+$ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_dir>
 ```
 
 ---

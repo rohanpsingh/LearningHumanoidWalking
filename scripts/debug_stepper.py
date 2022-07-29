@@ -6,7 +6,6 @@ import pickle
 import mujoco
 import numpy as np
 import transforms3d as tf3
-from functools import partial
 from run_experiment import import_env
 
 def print_reward(ep_rewards):
@@ -88,7 +87,8 @@ def run(env, policy):
         observation, _, done, info = env.step(action.copy())
         ep_rewards.append(info)
 
-        draw_stuff(env.task, viewer)
+        if env.__class__.__name__ == 'JvrcStepEnv':
+            draw_stuff(env.task, viewer)
         env.render()
 
         if hasattr(env, 'frame_skip'):
@@ -96,7 +96,6 @@ def run(env, policy):
             sim_dt = env.robot.client.sim_dt()
             delaytime = max(0, env.frame_skip / (1/sim_dt) - (end-start))
             time.sleep(delaytime)
-
         ts+=1
 
     print("Episode finished after {} timesteps".format(ts))
@@ -128,8 +127,7 @@ def main():
     policy = torch.load(path_to_actor)
     policy.eval()
     # import the correct environment
-    Env = import_env(run_args.env)
-    env = partial(Env)()
+    env = import_env(run_args.env)()
 
     run(env, policy)
     print("-----------------------------------------")
