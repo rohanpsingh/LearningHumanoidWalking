@@ -99,7 +99,7 @@ def run(env, policy):
 
         ts+=1
 
-    print("Episode finished after {} timesteps".format(t))
+    print("Episode finished after {} timesteps".format(ts))
     print_reward(ep_rewards)
     env.close()
 
