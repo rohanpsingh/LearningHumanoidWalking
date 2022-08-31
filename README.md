@@ -22,7 +22,7 @@ LearningHumanoidWalking/
 - pip install:
   - mujoco==2.1.5
   - [mujoco-python-viewer](https://github.com/rohanpsingh/mujoco-python-viewer)
-  - ray
+  - ray==1.9.2
   - transforms3d
 
 ## Usage:
