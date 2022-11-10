@@ -20,10 +20,12 @@ LearningHumanoidWalking/
 - Python version: 3.7.11  
 - [Pytorch](https://pytorch.org/)
 - pip install:
-  - mujoco==2.1.5
+  - mujoco==2.2.0
   - [mujoco-python-viewer](https://github.com/rohanpsingh/mujoco-python-viewer)
   - ray==1.9.2
   - transforms3d
+  - matplotlib
+  - scipy
 
 ## Usage:
 
