@@ -6,16 +6,13 @@ class JVRC:
         self.client = client
         self.control_dt = dt
 
-        # number of actuated joints
-        self.num_motors = self.client.nu()
-
         # list of desired actuators
         self.actuators = active
 
         # set PD gains
         self.kp = pdgains[0]
         self.kd = pdgains[1]
-        assert self.kp.shape==self.kd.shape==(self.num_motors,)
+        assert self.kp.shape==self.kd.shape==(self.client.nu(),)
         self.client.set_pd_gains(self.kp, self.kd)
         
         # define init qpos and qvel
@@ -38,10 +35,6 @@ class JVRC:
                              -3, -9.74, -30,
                              -3,  9.74, -30,
         ] # degrees
-
-        self.motor_speed_lim = [12.56636, 8.90117, 8.90117, 14.66075, 15.18435, 14.18435,
-                                12.56636, 8.90117, 8.90117, 14.66075, 15.18435, 14.18435,
-                                ] # radians per sec
 
         # number of all joints
         self.num_joints = len(half_sitting_pose)
@@ -79,7 +72,7 @@ class JVRC:
     def do_simulation(self, target, n_frames):
         ratio = self.client.get_gear_ratios()
         for _ in range(n_frames):
-            tau = self.client.step_pd(target, np.zeros(self.num_motors))
+            tau = self.client.step_pd(target, np.zeros(self.client.nu()))
             tau = [(i/j) for i,j in zip(tau, ratio)]
             self.client.set_motor_torque(tau)
             self.client.step()
