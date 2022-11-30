@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from torch.distributions import kl_divergence
 from torch.nn.utils.rnn import pad_sequence
+from torch.nn import functional as F
 
 import os
 import sys
@@ -96,11 +97,10 @@ class PPO:
         self.lam            = args['lam']
         self.lr             = args['lr']
         self.eps            = args['eps']
-        self.entropy_coeff  = args['entropy_coeff']
+        self.ent_coeff      = args['entropy_coeff']
         self.clip           = args['clip']
         self.minibatch_size = args['minibatch_size']
         self.epochs         = args['epochs']
-        self.num_steps      = args['num_steps']
         self.max_traj_len   = args['max_traj_len']
         self.use_gae        = args['use_gae']
         self.n_proc         = args['num_procs']
@@ -108,6 +108,12 @@ class PPO:
         self.mirror_coeff   = args['mirror_coeff']
         self.eval_freq      = args['eval_freq']
         self.recurrent      = False
+
+        # batch_size depends on number of parallel envs
+        self.batch_size = self.n_proc * self.max_traj_len
+
+        self.vf_coeff = 0.5
+        self.target_kl = None # By default, there is no limit on the kl div
 
         self.total_steps = 0
         self.highest_reward = -1
@@ -120,6 +126,10 @@ class PPO:
         self.eval_fn = os.path.join(self.save_path, 'eval.txt')
         with open(self.eval_fn, 'w') as out:
             out.write("test_ep_returns,test_ep_lens\n")
+
+        self.train_fn = os.path.join(self.save_path, 'train.txt')
+        with open(self.train_fn, 'w') as out:
+            out.write("ep_returns,ep_lens\n")
 
         # os.environ['OMP_NUM_THREA DS'] = '1'
         # if args['redis_address'] is not None:
@@ -139,10 +149,10 @@ class PPO:
 
     @ray.remote
     @torch.no_grad()
-    def sample(self, env_fn, policy, critic, min_steps, max_traj_len, deterministic=False, anneal=1.0, term_thresh=0):
+    def sample(self, env_fn, policy, critic, max_steps, max_traj_len, deterministic=False, anneal=1.0, term_thresh=0):
         """
-        Sample at least min_steps number of total timesteps, truncating
-        trajectories only if they exceed max_traj_len number of timesteps
+        Sample max_steps number of total timesteps, truncating
+        trajectories if they exceed max_traj_len number of timesteps.
         """
         torch.set_num_threads(1)    # By default, PyTorch will use multiple cores to speed up operations.
                                     # This can cause issues when Ray also uses multiple cores, especially on machines
@@ -154,13 +164,11 @@ class PPO:
         env.robot.iteration_count = self.iteration_count
 
         memory = PPOBuffer(self.gamma, self.lam)
+        memory_full = False
 
-        num_steps = 0
-        while num_steps < min_steps:
+        while not memory_full:
             state = torch.Tensor(env.reset())
-
             done = False
-            value = 0
             traj_len = 0
 
             if hasattr(policy, 'init_hidden_state'):
@@ -170,17 +178,19 @@ class PPO:
                 critic.init_hidden_state()
 
             while not done and traj_len < max_traj_len:
-                action = policy(state, deterministic=False, anneal=anneal)
+                action = policy(state, deterministic=deterministic, anneal=anneal)
                 value = critic(state)
 
                 next_state, reward, done, _ = env.step(action.numpy())
 
                 memory.store(state.numpy(), action.numpy(), reward, value.numpy())
+                memory_full = (len(memory) == max_steps)
 
                 state = torch.Tensor(next_state)
-
                 traj_len += 1
-                num_steps += 1
+
+                if memory_full:
+                    break
 
             value = critic(state)
             memory.finish_path(last_val=(not done) * value.numpy())
@@ -194,25 +204,7 @@ class PPO:
 
         # Create pool of workers, each getting data for min_steps
         workers = [worker.remote(*args) for _ in range(self.n_proc)]
-
-        result = []
-        total_steps = 0
-
-        while total_steps < min_steps:
-            # get result from a worker
-            ready_ids, _ = ray.wait(workers, num_returns=1)
-
-            # update result
-            result.append(ray.get(ready_ids[0]))
-
-            # remove ready_ids from workers (O(n)) but n isn't that big
-            workers.remove(ready_ids[0])
-
-            # update total steps
-            total_steps += len(result[-1])
-
-            # start a new worker
-            workers.append(worker.remote(*args))
+        result = ray.get(workers)
 
         # O(n)
         def merge(buffers):
@@ -244,23 +236,27 @@ class PPO:
 
         values = critic(obs_batch)
         pdf = policy.distribution(obs_batch)
-
-        # TODO, move this outside loop?
-        with torch.no_grad():
-            old_pdf = old_policy.distribution(obs_batch)
-            old_log_probs = old_pdf.log_prob(action_batch).sum(-1, keepdim=True)
-
         log_probs = pdf.log_prob(action_batch).sum(-1, keepdim=True)
 
+        old_pdf = old_policy.distribution(obs_batch)
+        old_log_probs = old_pdf.log_prob(action_batch).sum(-1, keepdim=True)
+
+        # ratio between old and new policy, should be one at the first iteration
         ratio = (log_probs - old_log_probs).exp()
 
+        # clipped surrogate loss
         cpi_loss = ratio * advantage_batch * mask
         clip_loss = ratio.clamp(1.0 - self.clip, 1.0 + self.clip) * advantage_batch * mask
         actor_loss = -torch.min(cpi_loss, clip_loss).mean()
 
-        critic_loss = 0.5 * ((return_batch - values) * mask).pow(2).mean()
+        # only used for logging
+        clip_fraction = torch.mean((torch.abs(ratio - 1) > self.clip).float()).item()
 
-        entropy_penalty = -(self.entropy_coeff * pdf.entropy() * mask).mean()
+        # Value loss using the TD(gae_lambda) target
+        critic_loss = self.vf_coeff * F.mse_loss(return_batch, values)
+
+        # Entropy loss favor exploration
+        entropy_penalty = -(pdf.entropy() * mask).mean()
 
         # Mirror Symmetry Loss
         if mirror_observation is not None and mirror_action is not None:
@@ -268,34 +264,26 @@ class PPO:
             mir_obs = mirror_observation(obs_batch)
             mirror_actions = policy(mir_obs)
             mirror_actions = mirror_action(mirror_actions)
-            mirror_loss = self.mirror_coeff * (deterministic_actions - mirror_actions).pow(2).mean()
+            mirror_loss = (deterministic_actions - mirror_actions).pow(2).mean()
         else:
-            mirror_loss = 0
+            mirror_loss = torch.Tensor([0])
 
-        self.actor_optimizer.zero_grad()
-        (actor_loss + mirror_loss + entropy_penalty).backward()
-
-        # Clip the gradient norm to prevent "unlucky" minibatches from
-        # causing pathological updates
-        torch.nn.utils.clip_grad_norm_(policy.parameters(), self.grad_clip)
-        self.actor_optimizer.step()
-
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-
-        # Clip the gradient norm to prevent "unlucky" minibatches from
-        # causing pathological updates
-        torch.nn.utils.clip_grad_norm_(critic.parameters(), self.grad_clip)
-        self.critic_optimizer.step()
-
+        # Calculate approximate form of reverse KL Divergence for early stopping
+        # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
+        # and discussion in PR #419: https://github.com/DLR-RM/stable-baselines3/pull/419
+        # and Schulman blog: http://joschu.net/blog/kl-approx.html
         with torch.no_grad():
-            kl = kl_divergence(pdf, old_pdf)
+            log_ratio = log_probs - old_log_probs
+            approx_kl_div = torch.mean((ratio - 1) - log_ratio)
 
-        if mirror_observation is not None and mirror_action is not None:
-            mirror_loss_return = mirror_loss.item()
-        else:
-            mirror_loss_return = 0
-        return actor_loss.item(), pdf.entropy().mean().item(), critic_loss.item(), ratio.mean().item(), kl.mean().item(), mirror_loss_return
+        return (
+            actor_loss,
+            entropy_penalty,
+            critic_loss,
+            approx_kl_div,
+            mirror_loss,
+            clip_fraction,
+        )
 
     def train(self,
               env_fn,
@@ -311,15 +299,14 @@ class PPO:
         self.actor_optimizer = optim.Adam(policy.parameters(), lr=self.lr, eps=self.eps)
         self.critic_optimizer = optim.Adam(critic.parameters(), lr=self.lr, eps=self.eps)
 
-        start_time = time.time()
+        train_start_time = time.time()
 
-        env = env_fn()
         obs_mirr, act_mirr = None, None
-        if hasattr(env, 'mirror_observation'):
-            obs_mirr = env.mirror_clock_observation
+        if hasattr(env_fn(), 'mirror_observation'):
+            obs_mirr = env_fn().mirror_clock_observation
 
-        if hasattr(env, 'mirror_action'):
-            act_mirr = env.mirror_action
+        if hasattr(env_fn(), 'mirror_action'):
+            act_mirr = env_fn().mirror_action
 
         curr_anneal = 1.0
         curr_thresh = 0
@@ -336,39 +323,43 @@ class PPO:
             # set iteration count (could be used for curriculum training)
             self.iteration_count = itr
 
-            sample_start = time.time()
+            sample_start_time = time.time()
             if self.highest_reward > (2/3)*self.max_traj_len and curr_anneal > 0.5:
                 curr_anneal *= anneal_rate
             if do_term and curr_thresh < 0.35:
                 curr_thresh = .1 * 1.0006**(itr-start_itr)
-            batch = self.sample_parallel(env_fn, self.policy, self.critic, self.num_steps, self.max_traj_len, anneal=curr_anneal, term_thresh=curr_thresh)
-
-            print("time elapsed: {:.2f} s".format(time.time() - start_time))
-            samp_time = time.time() - sample_start
-            print("sample time elapsed: {:.2f} s".format(samp_time))
-
+            batch = self.sample_parallel(env_fn, self.policy, self.critic, self.batch_size, self.max_traj_len, anneal=curr_anneal, term_thresh=curr_thresh)
             observations, actions, returns, values = map(torch.Tensor, batch.get())
 
+            num_samples = batch.storage_size()
+            elapsed = time.time() - sample_start_time
+            print("Sampling took {:.2f}s for {} steps.".format(elapsed, num_samples))
+
+            # Normalize advantage
             advantages = returns - values
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.eps)
 
-            minibatch_size = self.minibatch_size or advantages.numel()
-
-            print("timesteps in batch: %i" % advantages.numel())
-            self.total_steps += advantages.numel()
+            minibatch_size = self.minibatch_size or num_samples
+            self.total_steps += num_samples
 
             self.old_policy.load_state_dict(policy.state_dict())
 
-            optimizer_start = time.time()
+            # Is false when 1.5*self.target_kl is breached
+            continue_training = True
+
+            optimizer_start_time = time.time()
             for epoch in range(self.epochs):
-                losses = []
+                actor_losses = []
                 entropies = []
+                critic_losses = []
                 kls = []
+                mirror_losses = []
+                clip_fractions = []
                 if self.recurrent:
                     random_indices = SubsetRandomSampler(range(len(batch.traj_idx)-1))
                     sampler = BatchSampler(random_indices, minibatch_size, drop_last=False)
                 else:
-                    random_indices = SubsetRandomSampler(range(advantages.numel()))
+                    random_indices = SubsetRandomSampler(range(num_samples))
                     sampler = BatchSampler(random_indices, minibatch_size, drop_last=True)
 
                 for indices in sampler:
@@ -392,22 +383,42 @@ class PPO:
                         mask            = 1
 
                     scalars = self.update_policy(obs_batch, action_batch, return_batch, advantage_batch, mask, mirror_observation=obs_mirr, mirror_action=act_mirr)
-                    actor_loss, entropy, critic_loss, ratio, kl, mirror_loss = scalars
+                    actor_loss, entropy_penalty, critic_loss, approx_kl_div, mirror_loss, clip_fraction = scalars
 
-                    entropies.append(entropy)
-                    kls.append(kl)
-                    losses.append([actor_loss, entropy, critic_loss, ratio, kl, mirror_loss])
+                    actor_losses.append(actor_loss.item())
+                    entropies.append(entropy_penalty.item())
+                    critic_losses.append(critic_loss.item())
+                    kls.append(approx_kl_div.item())
+                    mirror_losses.append(mirror_loss.item())
+                    clip_fractions.append(clip_fraction)
 
-                # TODO: add verbosity arguments to suppress this
-                #print(' '.join(["%g"%x for x in np.mean(losses, axis=0)]))
+                    if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
+                        continue_training = False
+                        print(f"Early stopping at step {epoch} due to reaching max kl: {approx_kl_div:.2f}")
+                        break
+
+                    self.actor_optimizer.zero_grad()
+                    (actor_loss + self.mirror_coeff*mirror_loss + self.ent_coeff*entropy_penalty).backward()
+
+                    # Clip the gradient norm to prevent "unlucky" minibatches from
+                    # causing pathological updates
+                    torch.nn.utils.clip_grad_norm_(policy.parameters(), self.grad_clip)
+                    self.actor_optimizer.step()
+
+                    self.critic_optimizer.zero_grad()
+                    critic_loss.backward()
+
+                    # Clip the gradient norm to prevent "unlucky" minibatches from
+                    # causing pathological updates
+                    torch.nn.utils.clip_grad_norm_(critic.parameters(), self.grad_clip)
+                    self.critic_optimizer.step()
 
                 # Early stopping
-                if np.mean(kl) > 0.02:
-                    print("Max kl reached, stopping optimization early.")
+                if not continue_training:
                     break
 
-            opt_time = time.time() - optimizer_start
-            print("optimizer time elapsed: {:.2f} s".format(opt_time))
+            elapsed = time.time() - optimizer_start_time
+            print("Optimizer took: {:.2f}s".format(elapsed))
 
             if np.mean(batch.ep_lens) >= self.max_traj_len * 0.75:
                 ep_counter += 1
@@ -415,28 +426,30 @@ class PPO:
                 do_term = True
                 start_itr = itr
 
-
-            avg_batch_reward = np.mean(batch.ep_returns)
-            avg_ep_len = np.mean(batch.ep_lens)
-            mean_losses = np.mean(losses, axis=0)
-            # print("avg eval reward: {:.2f}".format(avg_eval_reward))
-
             sys.stdout.write("-" * 37 + "\n")
-            sys.stdout.write("| %15s | %15s |" % ('Return (batch)', avg_batch_reward) + "\n")
-            sys.stdout.write("| %15s | %15s |" % ('Mean Eplen', avg_ep_len) + "\n")
-            sys.stdout.write("| %15s | %15s |" % ('Mean KL Div', "%8.3g" % kl) + "\n")
-            sys.stdout.write("| %15s | %15s |" % ('Mean Entropy', "%8.3g" % entropy) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Return (batch)', "%8.5g" % np.mean(batch.ep_returns)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Mean Eplen', "%8.5g" % np.mean(batch.ep_lens)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Actor loss', "%8.3g" % np.mean(actor_losses)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Critic loss', "%8.3g" % np.mean(critic_losses)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Mirror loss', "%8.3g" % np.mean(mirror_losses)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Mean KL Div', "%8.3g" % np.mean(kls)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Mean Entropy', "%8.3g" % np.mean(entropies)) + "\n")
+            sys.stdout.write("| %15s | %15s |" % ('Clip Fraction', "%8.3g" % np.mean(clip_fractions)) + "\n")
             sys.stdout.write("-" * 37 + "\n")
             sys.stdout.flush()
 
-            entropy = np.mean(entropies)
-            kl = np.mean(kls)
+            elapsed = time.time() - train_start_time
+            print("Total time elapsed: {:.2f}s. Total steps: {} (fps={:.2f})".format(elapsed, self.total_steps, self.total_steps/elapsed))
+
+            # save metrics
+            with open(self.train_fn, 'a') as out:
+                out.write("{},{}\n".format(np.mean(batch.ep_returns), np.mean(batch.ep_lens)))
 
             # To save time, perform evaluation only after 100 iters
-            if itr%self.eval_freq==0:
+            if (itr+1)%self.eval_freq==0:
                 # logger
                 evaluate_start = time.time()
-                test = self.sample_parallel(env_fn, self.policy, self.critic, self.num_steps // 2, self.max_traj_len, deterministic=True)
+                test = self.sample_parallel(env_fn, self.policy, self.critic, self.batch_size, self.max_traj_len, deterministic=True)
                 eval_time = time.time() - evaluate_start
                 print("evaluate time elapsed: {:.2f} s".format(eval_time))
 
