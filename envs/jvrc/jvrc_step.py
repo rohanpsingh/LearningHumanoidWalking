@@ -48,8 +48,6 @@ class JvrcStepEnv(mujoco_env.MujocoEnv):
         self.task._total_duration = 1.1
         self.task._swing_duration = 0.75
         self.task._stance_duration = 0.35
-        # call reset
-        self.task.reset()
 
         self.robot = robot.JVRC(pdgains.T, control_dt, self.actuators, self.interface)
 
@@ -75,8 +73,6 @@ class JvrcStepEnv(mujoco_env.MujocoEnv):
         # set observation space
         self.base_obs_len = 41
         self.observation_space = np.zeros(self.base_obs_len)
-        
-        self.reset_model()
 
     def get_obs(self):
         # external state
@@ -153,6 +149,6 @@ class JvrcStepEnv(mujoco_env.MujocoEnv):
             self.init_qpos,
             self.init_qvel
         )
+        self.task.reset(iter_count = self.robot.iteration_count)
         obs = self.get_obs()
-        self.task.reset()
         return obs

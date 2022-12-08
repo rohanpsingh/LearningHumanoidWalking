@@ -21,6 +21,7 @@ class JVRC:
 
         self.prev_action = None
         self.prev_torque = None
+        self.iteration_count = np.inf
 
         # frame skip parameter
         if (np.around(self.control_dt%self.client.sim_dt(), 6)):
