@@ -29,7 +29,7 @@ def draw_stuff(task, viewer):
             step_pos = [step[0], step[1], step[2]]
             step_theta = step[3]
             if step_pos not in [task.sequence[task.t1][0:3].tolist(), task.sequence[task.t2][0:3].tolist()]:
-                viewer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 1, 0, 1]), type=sphere, label=repr(idx))
+                viewer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="")
                 viewer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
 
         target_radius = task.target_radius

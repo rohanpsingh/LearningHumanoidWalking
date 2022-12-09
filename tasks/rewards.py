@@ -84,7 +84,7 @@ def _calc_foot_frc_clock_reward(self, left_frc_fn, right_frc_fn):
 
 def _calc_foot_vel_clock_reward(self, left_vel_fn, right_vel_fn):
     # constraints of foot velocities based on clock
-    desired_max_foot_vel = 0.5
+    desired_max_foot_vel = 0.2
     normed_left_vel = min(np.linalg.norm(self.l_foot_vel), desired_max_foot_vel) / desired_max_foot_vel
     normed_right_vel = min(np.linalg.norm(self.r_foot_vel), desired_max_foot_vel) / desired_max_foot_vel
     normed_left_vel*=2
