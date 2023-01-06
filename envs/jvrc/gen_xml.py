@@ -89,7 +89,7 @@ def builder(export_path):
                                  material='')
 
     # export model
-    mjcf.export_with_assets(mjcf_model, out_dir=os.path.dirname(export_path), out_file_name=export_path)
+    mjcf.export_with_assets(mjcf_model, out_dir=os.path.dirname(export_path), out_file_name=export_path, precision=5)
     print("Exporting XML model to ", export_path)
     return
 
