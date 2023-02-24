@@ -67,11 +67,13 @@ $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_d
 ## Citation
 If you find this work useful in your own research:
 ```
-@article{singh2022learning,
+@inproceedings{singh2022learning,
   title={Learning Bipedal Walking On Planned Footsteps For Humanoid Robots},
-  author={Singh, Rohan Pratap and Benallegue, Mehdi and Morisawa, Mitsuharu and Cisneros, Rafael and Kanehiro, Fumio},
-  journal={arXiv preprint arXiv:2207.12644},
-  year={2022}
+  author={Singh, Rohan P and Benallegue, Mehdi and Morisawa, Mitsuharu and Cisneros, Rafael and Kanehiro, Fumio},
+  booktitle={2022 IEEE-RAS 21st International Conference on Humanoid Robots (Humanoids)},
+  pages={686--693},
+  year={2022},
+  organization={IEEE}
 }
 ```
 
