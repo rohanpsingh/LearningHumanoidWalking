@@ -11,6 +11,10 @@ def builder(export_path):
     print("Modifying XML model...")
     mjcf_model = mjcf.from_path(JVRC_DESCRIPTION_PATH)
 
+    # set njmax and nconmax
+    mjcf_model.size.njmax = 1200
+    mjcf_model.size.nconmax = 400
+
     # remove all collisions
     mjcf_model.contact.remove()
 
