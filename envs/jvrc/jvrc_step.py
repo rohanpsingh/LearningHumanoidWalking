@@ -17,7 +17,7 @@ class JvrcStepEnv(mujoco_env.MujocoEnv):
         control_dt = 0.025
         frame_skip = (control_dt/sim_dt)
 
-        path_to_xml_out = '/tmp/mjcf-export/jvrc/jvrc1.xml'
+        path_to_xml_out = '/tmp/mjcf-export/jvrc_step/jvrc1.xml'
         if not os.path.exists(path_to_xml_out):
             builder(path_to_xml_out)
         mujoco_env.MujocoEnv.__init__(self, path_to_xml_out, sim_dt, control_dt)

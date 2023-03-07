@@ -8,8 +8,8 @@ from envs.common import mujoco_env
 from envs.common import robot_interface
 from envs.jvrc import robot
 
-JVRC_DESCRIPTION_PATH="models/jvrc_mj_description/xml/jvrc1_terrain.xml"
-JVRC_PD_GAINS_PATH="models/jvrc_mj_description/pdgains/PDgains_sim.dat"
+from .gen_xml import builder
+
 
 class JvrcWalkEnv(mujoco_env.MujocoEnv):
     def __init__(self):
@@ -17,7 +17,10 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         control_dt = 0.025
         frame_skip = (control_dt/sim_dt)
 
-        mujoco_env.MujocoEnv.__init__(self, os.path.abspath(JVRC_DESCRIPTION_PATH), sim_dt, control_dt)
+        path_to_xml_out = '/tmp/mjcf-export/jvrc_walk/jvrc1.xml'
+        if not os.path.exists(path_to_xml_out):
+            builder(path_to_xml_out)
+        mujoco_env.MujocoEnv.__init__(self, path_to_xml_out, sim_dt, control_dt)
 
         pdgains = np.zeros((12, 2))
         coeff = 0.5
