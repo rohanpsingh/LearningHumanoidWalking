@@ -53,9 +53,6 @@ class WalkingTask(object):
                       com_vel_error=0.200 * rewards._calc_fwd_vel_reward(self),
                       torque_penalty=0.050 * rewards._calc_torque_reward(self, prev_torque),
                       action_penalty=0.050 * rewards._calc_action_reward(self, prev_action),
-                      joint_vel_reward=0.100 * rewards._calc_joint_vel_reward(self,
-                                                                              range(len(self._client.get_motor_velocities())),
-                                                                              cutoff=0.2)
         )
         return reward
 
