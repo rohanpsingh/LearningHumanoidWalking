@@ -61,6 +61,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
                                              root_body='PELVIS_S',
                                              lfoot_body='L_ANKLE_P_S',
                                              rfoot_body='R_ANKLE_P_S',
+                                             head_body='NECK_P_S',
         )
         # set goal height
         self.task._goal_height_ref = 0.80
@@ -70,6 +71,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
 
         # set up robot
         self.robot = RobotBase(pdgains, control_dt, self.interface, self.task)
+        self.task._neutral_pose=self.robot.nominal_pose
 
         # define indices for action and obs mirror fns
         base_mir_obs = [-0.1, 1,                   # root orient
@@ -79,7 +81,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
                         23, -24, -25, 26, -27, 28, # motor vel [1]
                         17, -18, -19, 20, -21, 22, # motor vel [2]
         ]
-        append_obs = [(len(base_mir_obs)+i) for i in range(3)]
+        append_obs = [(len(base_mir_obs)+i) for i in range(6)]
         self.robot.clock_inds = append_obs[0:2]
         self.robot.mirrored_obs = np.array(base_mir_obs + append_obs, copy=True).tolist()
         self.robot.mirrored_acts = [6, -7, -8, 9, -10, 11,
@@ -92,7 +94,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.prev_prediction = np.zeros(action_space_size)
 
         # set observation space
-        self.base_obs_len = 32
+        self.base_obs_len = 37
         self.observation_history = collections.deque(maxlen=self.history_len)
         self.observation_space = np.zeros(self.base_obs_len*self.history_len)
 
@@ -100,23 +102,25 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.obs_mean = np.concatenate((
             np.zeros(5),
             np.deg2rad(half_sitting_pose), np.zeros(12),
-            [0.5, 0.5, 0.5]
+            [0.5, 0.5, 0.5, 0, 0, 0]
         ))
 
         self.obs_std = np.concatenate((
             [0.2, 0.2, 1, 1, 1],
             0.5*np.ones(12), 4*np.ones(12),
-            [1, 1, 1,]
+            [1, 1, 1, 1, 1, 1]
         ))
 
         self.obs_mean = np.tile(self.obs_mean, self.history_len)
         self.obs_std = np.tile(self.obs_std, self.history_len)
 
+        self.reset_model()
+
     def get_obs(self):
         # external state
         clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
                  np.cos(2 * np.pi * self.task._phase / self.task._period)]
-        ext_state = np.concatenate((clock, [self.task._goal_speed_ref]))
+        ext_state = np.concatenate((clock, self.task.mode.encode(), [self.task.mode_ref]))
 
         # internal state
         qpos = np.copy(self.interface.get_qpos())
