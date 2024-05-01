@@ -300,11 +300,11 @@ class SteppingTask(object):
         sequence[:len(self.sequence)] = self.sequence
         for box, step in zip(boxes, sequence):
             box_h = self._client.model.geom(box).size[2]
-            self._client.model.geom(box).pos[:] = step[0:3] - np.array([0, 0, box_h])
-            self._client.model.geom(box).quat[:] = tf3.euler.euler2quat(0, 0, step[3])
+            self._client.model.body(box).pos[:] = step[0:3] - np.array([0, 0, box_h])
+            self._client.model.body(box).quat[:] = tf3.euler.euler2quat(0, 0, step[3])
             self._client.model.geom(box).size[:] = np.array([0.15, 1, box_h])
             self._client.model.geom(box).rgba[:] = np.array([0.8, 0.8, 0.8, 1])
 
-        self._client.model.geom('floor').pos[:] = np.array([0, 0, 0])
+        self._client.model.body('floor').pos[:] = np.array([0, 0, 0])
         if self.mode == WalkModes.FORWARD:
-            self._client.model.geom('floor').pos[:] = np.array([0, 0, -100])
+            self._client.model.body('floor').pos[:] = np.array([0, 0, -2])

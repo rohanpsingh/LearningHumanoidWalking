@@ -83,14 +83,20 @@ def builder(export_path):
 
     # add box geoms
     for idx in range(20):
-        mjcf_model.worldbody.add('geom',
-                                 name='box' + repr(idx+1).zfill(2),
-                                 pos='0 0 -0.2',
-                                 dclass='collision',
-                                 group='0',
-                                 size='1 1 0.1',
-                                 type='box',
-                                 material='')
+        name = 'box' + repr(idx+1).zfill(2)
+        mjcf_model.worldbody.add('body', name=name, pos=[0, 0, -0.2])
+        mjcf_model.find('body', name).add('geom',
+                                          name=name,
+                                          dclass='collision',
+                                          group='0',
+                                          size='1 1 0.1',
+                                          type='box',
+                                          material='')
+
+    # wrap floor geom in a body
+    mjcf_model.find('geom', 'floor').remove()
+    mjcf_model.worldbody.add('body', name='floor')
+    mjcf_model.find('body', 'floor').add('geom', name='floor', type="plane", size="0 0 0.25", material="groundplane")
 
     # export model
     mjcf.export_with_assets(mjcf_model, out_dir=os.path.dirname(export_path), out_file_name=export_path, precision=5)
