@@ -12,8 +12,16 @@ def builder(export_path):
     mjcf_model = mjcf.from_path(JVRC_DESCRIPTION_PATH)
 
     # set njmax and nconmax
-    mjcf_model.size.njmax = 1200
-    mjcf_model.size.nconmax = 400
+    mjcf_model.size.njmax = -1
+    mjcf_model.size.nconmax = -1
+    mjcf_model.statistic.meansize = 0.1
+    mjcf_model.statistic.meanmass = 2
+
+    # modify skybox
+    for tx in mjcf_model.asset.texture:
+        if tx.type=="skybox":
+            tx.rgb1 = '1 1 1'
+            tx.rgb2 = '1 1 1'
 
     # remove all collisions
     mjcf_model.contact.remove()
@@ -62,6 +70,9 @@ def builder(export_path):
             if (geom.dclass.dclass=="collision"):
                 if body.name not in collision_geoms:
                     geom.remove()
+
+    # move collision geoms to different group
+    mjcf_model.default.default['collision'].geom.group = 3
 
     # manually create collision geom for feet
     mjcf_model.worldbody.find('body', 'R_ANKLE_P_S').add('geom', dclass='collision', size='0.1 0.05 0.01', pos='0.029 0 -0.09778', type='box')
