@@ -19,8 +19,8 @@ def print_reward(ep_rewards):
     print('*********************************')
     print("mean per step reward: ", sum(mean_rewards.values()))
 
-def draw_stuff(task, viewer):
-    # render
+def draw_targets(task, viewer):
+    # draw step sequence
     arrow_size = [0.02, 0.02, 0.5]
     sphere = mujoco.mjtGeom.mjGEOM_SPHERE
     arrow = mujoco.mjtGeom.mjGEOM_ARROW
@@ -43,7 +43,14 @@ def draw_stuff(task, viewer):
         viewer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 0, 1, 1]), type=sphere, label="t2")
         viewer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([0, 0, 1, 1]), type=arrow, label="")
         viewer.add_marker(pos=step_pos, size=np.ones(3)*target_radius, rgba=np.array([0, 0, 1, 0.1]), type=sphere, label="")
+    return
 
+def draw_stuff(task, viewer):
+    arrow_size = [0.02, 0.02, 0.5]
+    sphere = mujoco.mjtGeom.mjGEOM_SPHERE
+    arrow = mujoco.mjtGeom.mjGEOM_ARROW
+
+    # draw observed targets
     goalx = task._goal_steps_x
     goaly = task._goal_steps_y
     goaltheta = task._goal_steps_theta
@@ -67,7 +74,7 @@ def draw_stuff(task, viewer):
     viewer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(-np.pi/2, np.pi/2, 0), size=[0.01, 0.01, 2], rgba=np.array([0, 1, 0, 0.2]), type=arrow, label="")
     return
 
-def run(env, policy):
+def run(env, policy, args):
     observation = env.reset()
 
     env.render()
@@ -77,7 +84,7 @@ def run(env, policy):
     ts, end_ts = 0, 2000
     ep_rewards = []
 
-    while (ts < end_ts) and (done == False):
+    while (ts < end_ts):
         if hasattr(env, 'frame_skip'):
             start = time.time()
 
@@ -88,14 +95,19 @@ def run(env, policy):
         ep_rewards.append(info)
 
         if env.__class__.__name__ == 'JvrcStepEnv':
+            draw_targets(env.task, viewer)
             draw_stuff(env.task, viewer)
         env.render()
 
-        if hasattr(env, 'frame_skip'):
+        if args.sync and hasattr(env, 'frame_skip'):
             end = time.time()
             sim_dt = env.robot.client.sim_dt()
             delaytime = max(0, env.frame_skip / (1/sim_dt) - (end-start))
             time.sleep(delaytime)
+
+        if args.quit_on_done and done:
+            break
+
         ts+=1
 
     print("Episode finished after {} timesteps".format(ts))
@@ -109,6 +121,16 @@ def main():
                         required=True,
                         type=str,
                         help="path to trained model dir",
+    )
+    parser.add_argument("--sync",
+                        required=False,
+                        action="store_true",
+                        help="sync the simulation speed with real time",
+    )
+    parser.add_argument("--quit-on-done",
+                        required=False,
+                        action="store_true",
+                        help="Exit when done condition is reached",
     )
     args = parser.parse_args()
 
@@ -129,7 +151,7 @@ def main():
     # import the correct environment
     env = import_env(run_args.env)()
 
-    run(env, policy)
+    run(env, policy, args)
     print("-----------------------------------------")
 
 if __name__=='__main__':
