@@ -223,7 +223,7 @@ class SteppingTask(object):
         pass
 
     def done(self):
-        contact_flag = self._client.check_bad_collisions()
+        contact_flag = self._client.check_self_collisions()
 
         qpos = self._client.get_object_xpos_by_name(self._root_body_name, 'OBJ_BODY')
         foot_pos = min([c[2] for c in (self.l_foot_pos, self.r_foot_pos)])
