@@ -140,13 +140,15 @@ class SteppingTask(object):
         sequence.append(first_step)
         x, z = 0, 0
         c = np.random.randint(2, 4)
-        for i in range(1, num_steps):
+        for i in range(1, num_steps-1):
             x += step_size
             y *= -1
             if i > c: # let height of first few steps equal to 0
                 z += step_height
             step = np.array([x, y, z, 0])
             sequence.append(step)
+        final_step = np.array([x+step_size, -y, z, 0])
+        sequence.append(final_step)
         return sequence
 
     def update_goal_steps(self):
