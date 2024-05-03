@@ -10,6 +10,9 @@ class RobotInterface(object):
         self.rfoot_body_name = rfoot_body_name
         self.lfoot_body_name = lfoot_body_name
         self.floor_body_name = 'world'
+        self.robot_root_name = 'PELVIS_S'
+
+        self.stepCounter = 0
 
     def nq(self):
         return self.model.nq
@@ -57,7 +60,7 @@ class RobotInterface(object):
         at the actuator level in revolutions per minute.
         """
         rpm_limits = self.model.actuator_user[:,0] # RPM
-        return ((rpm_limits)*(2*np.pi/60)).tolist() # radians per sec
+        return ((rpm_limits)*(2*np.pi/60)) # radians per sec
 
     def get_act_joint_speed_limits(self):
         """
@@ -106,13 +109,13 @@ class RobotInterface(object):
         """
         Returns position of actuators.
         """
-        return self.data.actuator_length.tolist()
+        return self.data.actuator_length
 
     def get_motor_velocities(self):
         """
         Returns velocities of actuators.
         """
-        return self.data.actuator_velocity.tolist()
+        return self.data.actuator_velocity
 
     def get_act_joint_torques(self):
         """
@@ -128,7 +131,7 @@ class RobotInterface(object):
         """
         gear_ratios = self.model.actuator_gear[:,0]
         motor_positions = self.get_motor_positions()
-        return [float(i/j) for i,j in zip(motor_positions, gear_ratios)]
+        return (motor_positions/gear_ratios)
 
     def get_act_joint_velocities(self):
         """
@@ -136,14 +139,35 @@ class RobotInterface(object):
         """
         gear_ratios = self.model.actuator_gear[:,0]
         motor_velocities = self.get_motor_velocities()
-        return [float(i/j) for i,j in zip(motor_velocities, gear_ratios)]
+        return (motor_velocities/gear_ratios)
 
-    def get_act_joint_range(self):
+    def get_act_joint_position(self, act_name):
+        """
+        Returns position of actuator at joint level.
+        """
+        assert len(self.data.actuator(act_name).length)==1
+        return self.data.actuator(act_name).length[0]/self.model.actuator(act_name).gear[0]
+
+    def get_act_joint_velocity(self, act_name):
+        """
+        Returns velocity of actuator at joint level.
+        """
+        assert len(self.data.actuator(act_name).velocity)==1
+        return self.data.actuator(act_name).velocity[0]/self.model.actuator(act_name).gear[0]
+
+    def get_act_joint_ranges(self):
         """
         Returns the lower and upper limits of all actuated joints.
         """
         indices = self.get_actuated_joint_inds()
         low, high = self.model.jnt_range[indices, :].T
+        return low, high
+
+    def get_act_joint_range(self, act_name):
+        """
+        Returns the lower and upper limits of given joint.
+        """
+        low, high = self.model.joint(act_name).range
         return low, high
 
     def get_actuator_ctrl_range(self):
@@ -167,15 +191,19 @@ class RobotInterface(object):
         return self.data.qvel[qveladr:qveladr+6].copy()
 
     def get_sensordata(self, sensor_name):
-        sensor_id = self.model.sensor(sensor_name)
-        sensor_adr = self.model.sensor_adr[sensor_id]
-        data_dim = self.model.sensor_dim[sensor_id]
+        sensor = self.model.sensor(sensor_name)
+        sensor_adr = sensor.adr[0]
+        data_dim = sensor.dim[0]
         return self.data.sensordata[sensor_adr:sensor_adr+data_dim]
 
     def get_rfoot_body_pos(self):
+        if isinstance(self.rfoot_body_name, list):
+            return [self.data.body(i).xpos.copy() for i in self.rfoot_body_name]
         return self.data.body(self.rfoot_body_name).xpos.copy()
 
     def get_lfoot_body_pos(self):
+        if isinstance(self.lfoot_body_name, list):
+            return [self.data.body(i).xpos.copy() for i in self.lfoot_body_name]
         return self.data.body(self.lfoot_body_name).xpos.copy()
 
     def get_rfoot_floor_contacts(self):
@@ -184,11 +212,14 @@ class RobotInterface(object):
         """
         contacts = [self.data.contact[i] for i in range(self.data.ncon)]
         rcontacts = []
-        floor_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.floor_body_name)
-        rfoot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.rfoot_body_name)
+
+        rfeet = [self.rfoot_body_name] if isinstance(self.rfoot_body_name, str) else self.rfoot_body_name
+        rfeet_ids = [self.model.body(bn).id for bn in rfeet]
         for i,c in enumerate(contacts):
-            geom1_is_floor = (self.model.geom_bodyid[c.geom1]==floor_id)
-            geom2_is_rfoot = (self.model.geom_bodyid[c.geom2]==rfoot_id)
+            geom1_body = self.model.body(self.model.geom_bodyid[c.geom1])
+            geom2_body = self.model.body(self.model.geom_bodyid[c.geom2])
+            geom1_is_floor = (self.model.body(geom1_body.rootid).name!=self.robot_root_name)
+            geom2_is_rfoot = (self.model.geom_bodyid[c.geom2] in rfeet_ids)
             if (geom1_is_floor and geom2_is_rfoot):
                 rcontacts.append((i,c))
         return rcontacts
@@ -199,11 +230,14 @@ class RobotInterface(object):
         """
         contacts = [self.data.contact[i] for i in range(self.data.ncon)]
         lcontacts = []
-        floor_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.floor_body_name)
-        lfoot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.lfoot_body_name)
+
+        lfeet = [self.lfoot_body_name] if isinstance(self.lfoot_body_name, str) else self.lfoot_body_name
+        lfeet_ids = [self.model.body(bn).id for bn in lfeet]
         for i,c in enumerate(contacts):
-            geom1_is_floor = (self.model.geom_bodyid[c.geom1]==floor_id)
-            geom2_is_lfoot = (self.model.geom_bodyid[c.geom2]==lfoot_id)
+            geom1_body = self.model.body(self.model.geom_bodyid[c.geom1])
+            geom2_body = self.model.body(self.model.geom_bodyid[c.geom2])
+            geom1_is_floor = (self.model.body(geom1_body.rootid).name!=self.robot_root_name)
+            geom2_is_lfoot = (self.model.geom_bodyid[c.geom2] in lfeet_ids)
             if (geom1_is_floor and geom2_is_lfoot):
                 lcontacts.append((i,c))
         return lcontacts
@@ -246,21 +280,17 @@ class RobotInterface(object):
         """
         Returns translational and rotational velocity of right foot.
         """
-        rfoot_vel = np.zeros(6)
-        rfoot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.rfoot_body_name)
-        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_XBODY,
-                                 rfoot_id, rfoot_vel, frame)
-        return [rfoot_vel[3:6], rfoot_vel[0:3]]
+        if isinstance(self.rfoot_body_name, list):
+            return [self.get_body_vel(i, frame=frame) for i in self.rfoot_body_name]
+        return self.get_body_vel(self.rfoot_body_name, frame=frame)
 
     def get_lfoot_body_vel(self, frame=0):
         """
         Returns translational and rotational velocity of left foot.
         """
-        lfoot_vel = np.zeros(6)
-        lfoot_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.lfoot_body_name)
-        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_XBODY,
-                                 lfoot_id, lfoot_vel, frame)
-        return [lfoot_vel[3:6], lfoot_vel[0:3]]
+        if isinstance(self.lfoot_body_name, list):
+            return [self.get_body_vel(i, frame=frame) for i in self.lfoot_body_name]
+        return self.get_body_vel(self.lfoot_body_name, frame=frame)
 
     def get_object_xpos_by_name(self, obj_name, object_type):
         if object_type=="OBJ_BODY":
@@ -339,17 +369,14 @@ class RobotInterface(object):
         Returns True if there are collisions other than any-geom-floor.
         """
         contacts = [self.data.contact[i] for i in range(self.data.ncon)]
-        floor_contacts = []
-        floor_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.floor_body_name)
         for i,c in enumerate(contacts):
-            geom1_is_floor = (self.model.geom_bodyid[c.geom1]==floor_id)
-            geom2_is_floor = (self.model.geom_bodyid[c.geom2]==floor_id)
-            if (geom1_is_floor or geom2_is_floor):
-                floor_contacts.append((i,c))
-        return len(floor_contacts) != self.data.ncon
-
-    def get_pd_target(self):
-        return [self.current_pos_target, self.current_vel_target]
+            geom1_body = self.model.body(self.model.geom_bodyid[c.geom1])
+            geom2_body = self.model.body(self.model.geom_bodyid[c.geom2])
+            geom1_is_robot = self.model.body(geom1_body.rootid).name==self.robot_root_name
+            geom2_is_robot = self.model.body(geom2_body.rootid).name==self.robot_root_name
+            if geom1_is_robot and geom2_is_robot:
+                return True
+        return False
 
     def set_pd_gains(self, kp, kv):
         assert kp.size==self.model.nu
@@ -359,10 +386,8 @@ class RobotInterface(object):
         return
 
     def step_pd(self, p, v):
-        self.current_pos_target = p.copy()
-        self.current_vel_target = v.copy()
-        target_angles = self.current_pos_target
-        target_speeds = self.current_vel_target
+        target_angles = p
+        target_speeds = v
 
         assert type(target_angles)==np.ndarray
         assert type(target_speeds)==np.ndarray
@@ -375,7 +400,6 @@ class RobotInterface(object):
 
         assert self.kp.size==perror.size
         assert self.kv.size==verror.size
-        assert perror.size==verror.size
         return self.kp * perror + self.kv * verror
 
     def set_motor_torque(self, torque):
@@ -384,21 +408,45 @@ class RobotInterface(object):
         """
         if isinstance(torque, np.ndarray):
             assert torque.shape==(self.nu(), )
-            ctrl = torque.tolist()
+            ctrl = torque
         elif isinstance(torque, list):
             assert len(torque)==self.nu()
             ctrl = np.copy(torque)
         else:
             raise Exception("motor torque should be list of ndarray.")
         try:
-            self.data.ctrl[:] = ctrl
+            np.copyto(self.data.ctrl, ctrl)
         except Exception as e:
             print("Could not apply motor torque.")
             print(e)
         return
 
-    def step(self):
+    def step(self, mj_step=True, nstep=1):
         """
-        Increment simulation by one step.
+        (Adapted from dm_control/mujoco/engine.py)
+
+        Advances physics with up-to-date position and velocity dependent fields.
+        Args:
+          nstep: Optional integer, number of steps to take.
         """
-        mujoco.mj_step(self.model, self.data)
+        if mj_step:
+            mujoco.mj_step(self.model, self.data, nstep)
+            self.stepCounter += nstep
+            return
+
+        # In the case of Euler integration we assume mj_step1 has already been
+        # called for this state, finish the step with mj_step2 and then update all
+        # position and velocity related fields with mj_step1. This ensures that
+        # (most of) mjData is in sync with qpos and qvel. In the case of non-Euler
+        # integrators (e.g. RK4) an additional mj_step1 must be called after the
+        # last mj_step to ensure mjData syncing.
+        if self.model.opt.integrator != mujoco.mjtIntegrator.mjINT_RK4.value:
+          mujoco.mj_step2(self.model, self.data)
+          if nstep > 1:
+            mujoco.mj_step(self.model, self.data, nstep-1)
+        else:
+          mujoco.mj_step(self.model, self.data, nstep)
+
+        mujoco.mj_step1(self.model, self.data)
+
+        self.stepCounter += nstep
