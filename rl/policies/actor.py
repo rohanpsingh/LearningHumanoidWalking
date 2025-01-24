@@ -16,9 +16,6 @@ class Actor(Net):
     def forward(self):
         raise NotImplementedError
 
-    def get_action(self):
-        raise NotImplementedError
-
 class Linear_Actor(Actor):
     def __init__(self, state_dim, action_dim, hidden_size=32):
         super(Linear_Actor, self).__init__()
@@ -34,11 +31,7 @@ class Linear_Actor(Actor):
     def forward(self, state):
         a = self.l1(state)
         a = self.l2(a)
-        self.action = a
         return a
-
-    def get_action(self):
-        return self.action
 
 class FF_Actor(Actor):
     def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=F.relu, max_action=1):
@@ -50,7 +43,6 @@ class FF_Actor(Actor):
             self.actor_layers += [nn.Linear(layers[i], layers[i+1])]
         self.network_out = nn.Linear(layers[-1], action_dim)
 
-        self.action = None
         self.action_dim = action_dim
         self.env_name = env_name
         self.nonlinearity = nonlinearity
@@ -64,11 +56,8 @@ class FF_Actor(Actor):
         for idx, layer in enumerate(self.actor_layers):
             x = self.nonlinearity(layer(x))
 
-        self.action = torch.tanh(self.network_out(x))
-        return self.action * self.max_action
-
-    def get_action(self):
-        return self.action
+        action = torch.tanh(self.network_out(x))
+        return action * self.max_action
 
 
 class LSTM_Actor(Actor):
@@ -81,7 +70,6 @@ class LSTM_Actor(Actor):
             self.actor_layers += [nn.LSTMCell(layers[i], layers[i+1])]
         self.network_out = nn.Linear(layers[i-1], action_dim)
 
-        self.action = None
         self.action_dim = action_dim
         self.init_hidden_state()
         self.env_name = env_name
@@ -132,15 +120,13 @@ class LSTM_Actor(Actor):
             if dims == 1:
                 x = x.view(-1)
 
-        self.action = self.network_out(x)
-        return self.action
-
-    def get_action(self):
-        return self.action
+        action = self.network_out(x)
+        return action
 
 
 class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conventions
-    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=torch.nn.functional.relu, fixed_std=None, bounded=False, normc_init=True):
+    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=torch.nn.functional.relu,
+                 init_std=0.2, learn_std=False, bounded=False, normc_init=True):
         super(Gaussian_FF_Actor, self).__init__()
 
         self.actor_layers = nn.ModuleList()
@@ -149,15 +135,14 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
             self.actor_layers += [nn.Linear(layers[i], layers[i+1])]
         self.means = nn.Linear(layers[-1], action_dim)
 
-        if fixed_std is None:  # probably don't want to use this for ppo, always use fixed std
-            self.log_stds = nn.Linear(layers[-1], action_dim)
-            self.learn_std = True
+        self.learn_std = learn_std
+        if self.learn_std:
+            self.stds = nn.Parameter(init_std * torch.ones(action_dim))
         else:
-            self.fixed_std = fixed_std
-            self.learn_std = False
+            self.stds = init_std * torch.ones(action_dim)
 
-        self.action = None
         self.action_dim = action_dim
+        self.state_dim = state_dim
         self.env_name = env_name
         self.nonlinearity = nonlinearity
 
@@ -188,27 +173,20 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
         if self.bounded:
             mean = torch.tanh(mean)
 
-        if self.learn_std:
-            # sd = torch.clamp(self.log_stds(x), LOG_STD_LO, LOG_STD_HI).exp()
-            sd = (-2+0.5*torch.tanh(self.log_stds(x))).exp()
-        else:
-            sd = self.fixed_std
-
+        sd = torch.zeros_like(mean)
+        if hasattr(self, 'stds'):
+            sd = self.stds
         return mean, sd
 
-    def forward(self, state, deterministic=True, anneal=1.0):
+    def forward(self, state, deterministic=True):
         mu, sd = self._get_dist_params(state)
-        sd *= anneal
 
         if not deterministic:
-            self.action = torch.distributions.Normal(mu, sd).sample()
+            action = torch.distributions.Normal(mu, sd).sample()
         else:
-            self.action = mu
+            action = mu
 
-        return self.action
-
-    def get_action(self):
-        return self.action
+        return action
 
     def distribution(self, inputs):
         mu, sd = self._get_dist_params(inputs)
@@ -216,7 +194,8 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
 
 
 class Gaussian_LSTM_Actor(Actor):
-    def __init__(self, state_dim, action_dim, layers=(128, 128), env_name=None, nonlinearity=F.tanh, normc_init=False, max_action=1, fixed_std=None):
+    def __init__(self, state_dim, action_dim, layers=(128, 128), env_name=None, nonlinearity=F.tanh, normc_init=False, max_action=1,
+                 init_std=0.2, learn_std=False):
         super(Gaussian_LSTM_Actor, self).__init__()
 
         self.actor_layers = nn.ModuleList()
@@ -225,7 +204,6 @@ class Gaussian_LSTM_Actor(Actor):
             self.actor_layers += [nn.LSTMCell(layers[i], layers[i+1])]
         self.network_out = nn.Linear(layers[i-1], action_dim)
 
-        self.action = None
         self.action_dim = action_dim
         self.init_hidden_state()
         self.env_name = env_name
@@ -238,12 +216,11 @@ class Gaussian_LSTM_Actor(Actor):
 
         self.is_recurrent = True
 
-        if fixed_std is None:
-            self.log_stds = nn.Linear(layers[-1], action_dim)
-            self.learn_std = True
+        self.learn_std = learn_std
+        if self.learn_std:
+            self.stds = nn.Parameter(init_std * torch.ones(action_dim))
         else:
-            self.fixed_std = fixed_std
-            self.learn_std = False
+            self.stds = init_std * torch.ones(action_dim)
 
         if normc_init:
             self.initialize_parameters()
@@ -281,34 +258,26 @@ class Gaussian_LSTM_Actor(Actor):
                 x = x.view(-1)
 
         mu = self.network_out(x)
-        if self.learn_std:
-            sd = torch.clamp(self.log_stds(x), LOG_STD_LO, LOG_STD_HI).exp()
-        else:
-            sd = self.fixed_std
-
+        sd = self.stds
         return mu, sd
 
     def init_hidden_state(self, batch_size=1):
         self.hidden = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
         self.cells = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
 
-    def forward(self, state, deterministic=True, anneal=1.0):
+    def forward(self, state, deterministic=True):
         mu, sd = self._get_dist_params(state)
-        sd *= anneal
 
         if not deterministic:
-            self.action = torch.distributions.Normal(mu, sd).sample()
+            action = torch.distributions.Normal(mu, sd).sample()
         else:
-            self.action = mu
+            action = mu
 
-        return self.action
+        return action
 
     def distribution(self, inputs):
         mu, sd = self._get_dist_params(inputs)
         return torch.distributions.Normal(mu, sd)
-
-    def get_action(self):
-        return self.action
 
 # Initialization scheme for gaussian mlp (from ppo paper)
 # NOTE: the fact that this has the same name as a parameter caused a NASTY bug
