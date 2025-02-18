@@ -100,7 +100,7 @@ class H1Env(mujoco_env.MujocoEnv):
                 'raisedplatform': False,
                 'ctrllimited': self.cfg.ctrllimited,
                 'jointlimited': self.cfg.jointlimited,
-                'reduced': self.cfg.reduced_xml,
+                'minimal': self.cfg.reduced_xml,
             })
 
         mujoco_env.MujocoEnv.__init__(self, path_to_xml, sim_dt, control_dt)
@@ -114,11 +114,9 @@ class H1Env(mujoco_env.MujocoEnv):
         pdgains[1] = self.cfg.kd
 
         # list of desired actuators
-        self.leg_names = ["left_hip_yaw", "left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
-                          "right_hip_yaw", "right_hip_roll", "right_hip_pitch", "right_knee", "right_ankle"]
-        self.torso_names = ["torso"]
-        self.arm_names = ["left_shoulder_pitch", "left_shoulder_roll", "left_shoulder_yaw", "left_elbow",
-                          "right_shoulder_pitch", "right_shoulder_roll", "right_shoulder_yaw", "right_elbow"]
+        self.leg_names = LEG_JOINTS
+        self.torso_names = WAIST_JOINTS
+        self.arm_names = ARM_JOINTS
 
         # define nominal pose
         base_position = [0, 0, 0.98]
@@ -302,3 +300,9 @@ class H1Env(mujoco_env.MujocoEnv):
             default_ipos = self.default_model.body(body).ipos
             self.model.body(body).mass[0] = default_mass*np.random.uniform(0.95, 1.05)
             self.model.body(body).ipos = default_ipos + np.random.uniform(-0.01, 0.01, 3)
+
+    def viewer_setup(self):
+        super().viewer_setup()
+        self.viewer.cam.distance = 5
+        self.viewer.cam.lookat[2] = 1.5
+        self.viewer.cam.lookat[0] = 1.0
