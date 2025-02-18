@@ -9,8 +9,8 @@ class RobotInterface(object):
 
         self.rfoot_body_name = rfoot_body_name
         self.lfoot_body_name = lfoot_body_name
-        self.floor_body_name = 'world'
-        self.robot_root_name = 'PELVIS_S'
+        self.floor_body_name = model.body(0).name
+        self.robot_root_name = model.body(1).name
 
         self.stepCounter = 0
 
@@ -122,8 +122,8 @@ class RobotInterface(object):
         Returns actuator force in joint space.
         """
         gear_ratios = self.model.actuator_gear[:,0]
-        motor_torques = self.data.actuator_force.tolist()
-        return [float(i*j) for i,j in zip(motor_torques, gear_ratios)]
+        motor_torques = self.data.actuator_force
+        return (motor_torques*gear_ratios)
 
     def get_act_joint_positions(self):
         """
@@ -206,6 +206,24 @@ class RobotInterface(object):
             return [self.data.body(i).xpos.copy() for i in self.lfoot_body_name]
         return self.data.body(self.lfoot_body_name).xpos.copy()
 
+    def get_body_floor_contacts(self, body_name):
+        """
+        Returns list of 'body' and floor contacts.
+        """
+        contacts = [self.data.contact[i] for i in range(self.data.ncon)]
+        body_contacts = []
+
+        body_names = [body_name] if isinstance(body_name, str) else body_name
+        body_ids = [self.model.body(bn).id for bn in body_names]
+        for i,c in enumerate(contacts):
+            geom1_body = self.model.body(self.model.geom_bodyid[c.geom1])
+            geom2_body = self.model.body(self.model.geom_bodyid[c.geom2])
+            geom1_is_floor = (self.model.body(geom1_body.rootid).name!=self.robot_root_name)
+            geom2_is_body = (self.model.geom_bodyid[c.geom2] in body_ids)
+            if (geom1_is_floor and geom2_is_body):
+                body_contacts.append((i,c))
+        return body_contacts
+
     def get_rfoot_floor_contacts(self):
         """
         Returns list of right foot and floor contacts.
@@ -266,6 +284,36 @@ class RobotInterface(object):
             lfoot_grf += (np.linalg.norm(c_array))
         return lfoot_grf
 
+    def get_body_contact_force(self, body):
+        """
+        Returns total contact force acting on a body (or list of bodies).
+        """
+        if isinstance(body, str):
+            body = [body]
+        frc = 0
+        for i, con in enumerate(self.data.contact):
+            c_array = np.zeros(6, dtype=np.float64)
+            mujoco.mj_contactForce(self.model, self.data, i, c_array)
+            b1 = self.model.body(self.model.geom(con.geom1).bodyid)
+            b2 = self.model.body(self.model.geom(con.geom2).bodyid)
+            if b1.name in body or b2.name in body:
+                frc += np.linalg.norm(c_array)
+        return frc
+
+    def get_interaction_force(self, body1, body2):
+        """
+        Returns contact force beween a body1 and body2.
+        """
+        frc = 0
+        for i, con in enumerate(self.data.contact):
+            c_array = np.zeros(6, dtype=np.float64)
+            mujoco.mj_contactForce(self.model, self.data, i, c_array)
+            b1 = self.model.body(self.model.geom(con.geom1).bodyid)
+            b2 = self.model.body(self.model.geom(con.geom2).bodyid)
+            if (b1.name==body1 and b2.name==body2) or (b1.name==body2 and b2.name==body1):
+                frc += np.linalg.norm(c_array)
+        return frc
+
     def get_body_vel(self, body_name, frame=0):
         """
         Returns translational and rotational velocity of a body in body-centered frame, world/local orientation.
@@ -292,24 +340,33 @@ class RobotInterface(object):
             return [self.get_body_vel(i, frame=frame) for i in self.lfoot_body_name]
         return self.get_body_vel(self.lfoot_body_name, frame=frame)
 
-    def get_object_xpos_by_name(self, obj_name, object_type):
+    def get_object_xpos_by_name(self, object_name, object_type):
         if object_type=="OBJ_BODY":
-            return self.data.body(obj_name).xpos
+            return self.data.body(object_name).xpos
         elif object_type=="OBJ_GEOM":
-            return self.data.geom(obj_name).xpos
+            return self.data.geom(object_name).xpos
         elif object_type=="OBJ_SITE":
-            return self.data.site(obj_name).xpos
+            return self.data.site(object_name).xpos
         else:
             raise Exception("object type should either be OBJ_BODY/OBJ_GEOM/OBJ_SITE.")
 
-    def get_object_xquat_by_name(self, obj_name, object_type):
+    def get_object_xquat_by_name(self, object_name, object_type):
         if object_type=="OBJ_BODY":
-            return self.data.body(obj_name).xquat
+            return self.data.body(object_name).xquat
+        if object_type=="OBJ_GEOM":
+            xmat = self.data.geom(object_name).xmat
+            return tf3.quaternions.mat2quat(xmat)
         if object_type=="OBJ_SITE":
-            xmat = self.data.site(obj_name).xmat
+            xmat = self.data.site(object_name).xmat
             return tf3.quaternions.mat2quat(xmat)
         else:
-            raise Exception("object type should be OBJ_BODY/OBJ_SITE.")
+            raise Exception("object type should be OBJ_BODY/OBJ_GEOM/OBJ_SITE.")
+
+    def get_object_affine_by_name(self, object_name, object_type):
+        """Helper to create transformation matrix from position and quaternion."""
+        pos = self.get_object_xpos_by_name(object_name, object_type)
+        quat = self.get_object_xquat_by_name(object_name, object_type)
+        return tf3.affines.compose(pos, tf3.quaternions.quat2mat(quat), np.ones(3))
 
     def get_robot_com(self):
         """
@@ -356,13 +413,21 @@ class RobotInterface(object):
         """
         return (len(self.get_lfoot_floor_contacts())>0)
 
-    def check_bad_collisions(self):
+    def check_bad_collisions(self, body_names=[]):
         """
-        Returns True if there are collisions other than feet-floor.
+        Returns True if there are collisions other than specifiedbody-floor,
+        or feet-floor if body_names is not provided.
         """
-        num_rcons = len(self.get_rfoot_floor_contacts())
-        num_lcons = len(self.get_lfoot_floor_contacts())
-        return (num_rcons + num_lcons) != self.data.ncon
+        num_cons = 0
+        if not isinstance(body_names, list):
+            raise TypeError(f"expected list of body names, got '{type(body_names).__name__}'")
+        if not len(body_names):
+            num_rcons = len(self.get_rfoot_floor_contacts())
+            num_lcons = len(self.get_lfoot_floor_contacts())
+            num_cons = num_rcons + num_lcons
+        for bn in body_names:
+            num_cons += len(self.get_body_floor_contacts(bn))
+        return num_cons != self.data.ncon
 
     def check_self_collisions(self):
         """
