@@ -348,10 +348,10 @@ class PPO:
 
                 for indices in sampler:
                     if self.recurrent:
-                        obs_batch       = [observations[batch.traj_idx[i]:batch.traj_idx[i+1]] for i in indices]
-                        action_batch    = [actions[batch.traj_idx[i]:batch.traj_idx[i+1]] for i in indices]
-                        return_batch    = [returns[batch.traj_idx[i]:batch.traj_idx[i+1]] for i in indices]
-                        advantage_batch = [advantages[batch.traj_idx[i]:batch.traj_idx[i+1]] for i in indices]
+                        obs_batch       = [observations[int(batch.traj_idx[i]):int(batch.traj_idx[i+1])] for i in indices]
+                        action_batch    = [actions[int(batch.traj_idx[i]):int(batch.traj_idx[i+1])] for i in indices]
+                        return_batch    = [returns[int(batch.traj_idx[i]):int(batch.traj_idx[i+1])] for i in indices]
+                        advantage_batch = [advantages[int(batch.traj_idx[i]):int(batch.traj_idx[i+1])] for i in indices]
                         mask            = [torch.ones_like(r) for r in return_batch]
 
                         obs_batch       = pad_sequence(obs_batch, batch_first=False)
