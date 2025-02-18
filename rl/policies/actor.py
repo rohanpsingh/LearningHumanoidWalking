@@ -6,9 +6,6 @@ from torch import sqrt
 
 from rl.policies.base import Net
 
-LOG_STD_HI = -1.5
-LOG_STD_LO = -20
-
 class Actor(Net):
     def __init__(self):
         super(Actor, self).__init__()
@@ -34,7 +31,7 @@ class Linear_Actor(Actor):
         return a
 
 class FF_Actor(Actor):
-    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=F.relu, max_action=1):
+    def __init__(self, state_dim, action_dim, layers=(256, 256), nonlinearity=F.relu):
         super(FF_Actor, self).__init__()
 
         self.actor_layers = nn.ModuleList()
@@ -44,12 +41,9 @@ class FF_Actor(Actor):
         self.network_out = nn.Linear(layers[-1], action_dim)
 
         self.action_dim = action_dim
-        self.env_name = env_name
         self.nonlinearity = nonlinearity
 
         self.initialize_parameters()
-
-        self.max_action = max_action
 
     def forward(self, state, deterministic=True):
         x = state
@@ -57,11 +51,11 @@ class FF_Actor(Actor):
             x = self.nonlinearity(layer(x))
 
         action = torch.tanh(self.network_out(x))
-        return action * self.max_action
+        return action
 
 
 class LSTM_Actor(Actor):
-    def __init__(self, state_dim, action_dim, layers=(128, 128), env_name=None, nonlinearity=torch.tanh, max_action=1):
+    def __init__(self, state_dim, action_dim, layers=(128, 128), nonlinearity=torch.tanh):
         super(LSTM_Actor, self).__init__()
 
         self.actor_layers = nn.ModuleList()
@@ -72,12 +66,7 @@ class LSTM_Actor(Actor):
 
         self.action_dim = action_dim
         self.init_hidden_state()
-        self.env_name = env_name
         self.nonlinearity = nonlinearity
-
-        self.is_recurrent = True
-
-        self.max_action = max_action
 
     def get_hidden_state(self):
         return self.hidden, self.cells
@@ -125,7 +114,7 @@ class LSTM_Actor(Actor):
 
 
 class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conventions
-    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=torch.nn.functional.relu,
+    def __init__(self, state_dim, action_dim, layers=(256, 256), nonlinearity=torch.nn.functional.relu,
                  init_std=0.2, learn_std=False, bounded=False, normc_init=True):
         super(Gaussian_FF_Actor, self).__init__()
 
@@ -143,7 +132,6 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
 
         self.action_dim = action_dim
         self.state_dim = state_dim
-        self.env_name = env_name
         self.nonlinearity = nonlinearity
 
         # Initialized to no input normalization, can be modified later
@@ -194,7 +182,7 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
 
 
 class Gaussian_LSTM_Actor(Actor):
-    def __init__(self, state_dim, action_dim, layers=(128, 128), env_name=None, nonlinearity=F.tanh, normc_init=False, max_action=1,
+    def __init__(self, state_dim, action_dim, layers=(128, 128), nonlinearity=F.tanh, normc_init=False,
                  init_std=0.2, learn_std=False):
         super(Gaussian_LSTM_Actor, self).__init__()
 
@@ -205,16 +193,13 @@ class Gaussian_LSTM_Actor(Actor):
         self.network_out = nn.Linear(layers[i-1], action_dim)
 
         self.action_dim = action_dim
+        self.state_dim = state_dim
         self.init_hidden_state()
-        self.env_name = env_name
         self.nonlinearity = nonlinearity
-        self.max_action = max_action
 
         # Initialized to no input normalization, can be modified later
         self.obs_std = 1.0
         self.obs_mean = 0.0
-
-        self.is_recurrent = True
 
         self.learn_std = learn_std
         if self.learn_std:
