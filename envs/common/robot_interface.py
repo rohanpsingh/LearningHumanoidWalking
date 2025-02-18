@@ -1,9 +1,13 @@
+import os
 import numpy as np
 import transforms3d as tf3
 import mujoco
+import torch
+import collections
 
 class RobotInterface(object):
-    def __init__(self, model, data, rfoot_body_name=None, lfoot_body_name=None):
+    def __init__(self, model, data, rfoot_body_name=None, lfoot_body_name=None,
+                 path_to_nets=None):
         self.model = model
         self.data = data
 
@@ -13,6 +17,44 @@ class RobotInterface(object):
         self.robot_root_name = model.body(1).name
 
         self.stepCounter = 0
+
+        if path_to_nets:
+            self.load_motor_nets(path_to_nets)
+
+    def load_motor_nets(self, path_to_nets):
+        self.motor_dyn_nets = {}
+        for jnt in os.listdir(path_to_nets):
+            if not os.path.isdir(os.path.join(path_to_nets, jnt)):
+                continue
+            net_path = os.path.join(path_to_nets, jnt, "trained_jit.pth")
+            net = torch.jit.load(net_path)
+            net.eval()
+            self.motor_dyn_nets[jnt] = net
+        self.ctau_buffer = collections.deque(maxlen=25)
+        self.qdot_buffer = collections.deque(maxlen=25)
+        return
+
+    def motor_nets_forward(self, cmdTau):
+        if len(self.ctau_buffer)<self.ctau_buffer.maxlen:
+            w = self.get_act_joint_velocities()
+            self.qdot_buffer.append(w)
+            self.ctau_buffer.append(cmdTau)
+            return cmdTau
+        if (self.stepCounter % 2)==0:
+            w = self.get_act_joint_velocities()
+            self.qdot_buffer.append(w)
+            self.ctau_buffer.append(cmdTau)
+
+        actTau = np.copy(cmdTau)
+        for jnt in self.motor_dyn_nets.keys():
+            jnt_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, jnt + '_motor')
+            nn = self.motor_dyn_nets[jnt].double()
+
+            qdot = torch.tensor(np.array(self.qdot_buffer), dtype=torch.double)
+            ctau = torch.tensor(np.array(self.ctau_buffer), dtype=torch.double)
+            inp = torch.cat([qdot[:, jnt_id], ctau[:, jnt_id]])
+            actTau[jnt_id] = nn(inp)
+        return actTau
 
     def nq(self):
         return self.model.nq
@@ -467,7 +509,7 @@ class RobotInterface(object):
         assert self.kv.size==verror.size
         return self.kp * perror + self.kv * verror
 
-    def set_motor_torque(self, torque):
+    def set_motor_torque(self, torque, motor_dyn_fwd = False):
         """
         Apply torques to motors.
         """
@@ -480,6 +522,12 @@ class RobotInterface(object):
         else:
             raise Exception("motor torque should be list of ndarray.")
         try:
+            if motor_dyn_fwd:
+                if not hasattr(self, 'motor_dyn_nets'):
+                    raise Exception("motor dynamics network are not defined.")
+                gear = self.get_gear_ratios()
+                ctrl = self.motor_nets_forward(ctrl*gear)
+                ctrl /= gear
             np.copyto(self.data.ctrl, ctrl)
         except Exception as e:
             print("Could not apply motor torque.")
