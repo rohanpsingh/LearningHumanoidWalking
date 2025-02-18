@@ -19,6 +19,8 @@ def import_env(env_name_str):
         from envs.jvrc import JvrcWalkEnv as Env
     elif env_name_str=='jvrc_step':
         from envs.jvrc import JvrcStepEnv as Env
+    elif env_name_str=='h1':
+        from envs.h1 import H1Env as Env
     else:
         raise Exception("Check env name!")
     return Env
