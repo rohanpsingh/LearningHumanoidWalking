@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
         # import the correct environment
         Env = import_env(run_args.env)
-        if run_args.yaml:
+        if "yaml" in run_args:
             yaml_path = Path(run_args.yaml)
         else:
             yaml_path = None
