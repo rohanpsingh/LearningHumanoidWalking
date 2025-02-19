@@ -10,7 +10,6 @@ import pickle
 import shutil
 
 from rl.algos.ppo import PPO
-from rl.envs.normalize import get_normalization_params
 from rl.envs.wrappers import SymmetricEnv
 from rl.utils.eval import EvaluateEnv
 

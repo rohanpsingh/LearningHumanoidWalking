@@ -19,6 +19,7 @@ import ray
 from rl.storage.rollout_storage import PPOBuffer
 from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
+from rl.envs.normalize import get_normalization_params
 
 class PPO:
     def __init__(self, env_fn, args):
