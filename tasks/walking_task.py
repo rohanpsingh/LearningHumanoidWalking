@@ -52,7 +52,7 @@ class WalkingTask(object):
                       height_error=0.050 * rewards._calc_height_reward(self),
                       com_vel_error=0.200 * rewards._calc_fwd_vel_reward(self),
                       torque_penalty=0.050 * rewards._calc_torque_reward(self, prev_torque),
-                      action_penalty=0.050 * rewards._calc_action_reward(self, prev_action),
+                      action_penalty=0.050 * rewards._calc_action_reward(self, action, prev_action),
         )
         return reward
 

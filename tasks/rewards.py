@@ -12,9 +12,8 @@ def _calc_fwd_vel_reward(self):
     error = np.linalg.norm(root_vel - self._goal_speed_ref)
     return np.exp(-error)
 
-def _calc_action_reward(self, prev_action):
+def _calc_action_reward(self, action, prev_action):
     # action reward
-    action = self._client.get_pd_target()[0]
     penalty = 5 * sum(np.abs(prev_action - action)) / len(action)
     return np.exp(-penalty)
 
