@@ -73,7 +73,7 @@ class WalkingTask(object):
         done = True in terminate_conditions.values()
         return done
 
-    def reset(self):
+    def reset(self, iter_count=0):
         self._goal_speed_ref = np.random.choice([0, np.random.uniform(0.3, 0.4)])
         self.right_clock, self.left_clock = rewards.create_phase_reward(self._swing_duration,
                                                                         self._stance_duration,

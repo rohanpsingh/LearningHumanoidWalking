@@ -1,5 +1,4 @@
 import os
-import copy
 import numpy as np
 import transforms3d as tf3
 import collections
@@ -50,10 +49,10 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         half_sitting_pose = [-30,  0, 0, 50, 0, -24,
                              -30,  0, 0, 50, 0, -24,
         ] # degrees
+        self.nominal_pose = base_position + base_orientation + np.deg2rad(half_sitting_pose).tolist()
 
         # set up interface
         self.interface = robot_interface.RobotInterface(self.model, self.data, 'R_ANKLE_P_S', 'L_ANKLE_P_S', None)
-        self.nominal_pose = base_position + base_orientation + np.deg2rad(half_sitting_pose).tolist()
 
         # set up task
         self.task = walking_task.WalkingTask(client=self.interface,
@@ -112,9 +111,6 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
 
         self.obs_mean = np.tile(self.obs_mean, self.history_len)
         self.obs_std = np.tile(self.obs_std, self.history_len)
-
-        # copy the original model
-        self.default_model = copy.deepcopy(self.model)
 
     def get_obs(self):
         # external state
@@ -175,7 +171,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
             np.asarray(init_qvel)
         )
 
-        self.task.reset()
+        self.task.reset(iter_count=self.robot.iteration_count)
 
         self.prev_prediction = np.zeros_like(self.prev_prediction)
         self.observation_history = collections.deque(maxlen=self.history_len)
