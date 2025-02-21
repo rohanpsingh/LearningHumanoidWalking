@@ -68,8 +68,8 @@ def builder(export_path, config):
     mjcf_model.keyframe.remove()
 
     # remove vis geoms and assets, if needed
-    if 'reduced' in config:
-        if config['reduced']:
+    if 'minimal' in config:
+        if config['minimal']:
             mjcf_model.find('default', 'collision').geom.group = 1
             meshes = mjcf_model.asset.mesh
             for mesh in meshes:
