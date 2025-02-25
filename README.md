@@ -8,6 +8,11 @@ Code for the papers:
 [Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)  
 (WIP on branch `topic/omnidirectional-walk`)
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" />
+</p>
+
+
 ## Code structure:
 A rough outline for the repository that might be useful for adding your own robot:
 ```
