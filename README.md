@@ -16,7 +16,6 @@ LearningHumanoidWalking/
 ├── tasks/               <-- Reward function, termination conditions, and more...
 ├── rl/                  <-- Code for PPO, actor/critic networks, observation normalization process...
 ├── models/              <-- MuJoCo model files: XMLs/meshes/textures
-├── trained/             <-- Contains pretrained model for JVRC
 └── scripts/             <-- Utility scripts, etc.
 ```
 
@@ -37,6 +36,7 @@ Environment names supported:
 
 | Task Description      | Environment name |
 | ----------- | ----------- |
+| Basic Standing Task   | 'h1' |
 | Basic Walking Task   | 'jvrc_walk' |
 | Stepping Task (using footsteps)  | 'jvrc_step' |
 
@@ -69,7 +69,35 @@ $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_d
 
 
 ## Citation
-If you find this work useful in your own research:
+If you find this work useful in your own research, please cite the following works:
+
+For omnidirectional walking:
+```
+@inproceedings{singh2024robust,
+  title={Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning},
+  author={Singh, Rohan P and Morisawa, Mitsuharu and Benallegue, Mehdi and Xie, Zhaoming and Kanehiro, Fumio},
+  booktitle={2024 IEEE-RAS 23rd International Conference on Humanoid Robots (Humanoids)},
+  pages={497--504},
+  year={2024},
+  organization={IEEE}
+}
+```
+
+For simulating "back-emf" effect:
+```
+@article{xie2023learning,
+  title={Learning bipedal walking for humanoids with current feedback},
+  author={Xie, Zhaoming and Gergondet, Pierre and Kanehiro, Fumio and others},
+  journal={IEEE Access},
+  volume={11},
+  pages={82013--82023},
+  year={2023},
+  publisher={IEEE}
+}
+```
+
+For walking on footsteps:  
+
 ```
 @inproceedings{singh2022learning,
   title={Learning Bipedal Walking On Planned Footsteps For Humanoid Robots},
