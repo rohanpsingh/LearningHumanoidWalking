@@ -1,5 +1,9 @@
 # LearningHumanoidWalking
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=ZgfNzGAkk2Q"><img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" alt="humanoid-walk" style="width:1000px"/></a>
+</p>
+
 Code for the papers:  
 - [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)  
 [Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
@@ -7,9 +11,6 @@ Code for the papers:
 - [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)  
 [Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" href="https://www.youtube.com/watch?v=ZgfNzGAkk2Q" />
-</p>
 
 
 ## Code structure:
@@ -24,8 +25,7 @@ LearningHumanoidWalking/
 ```
 
 ## Requirements:
-- Python version: 3.7.11  
-- [Pytorch](https://pytorch.org/)
+- Python version: 3.12.4
 - pip install:
   - mujoco==3.2.2
   - ray==2.40.0
