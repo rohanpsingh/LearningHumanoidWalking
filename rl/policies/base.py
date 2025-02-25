@@ -16,13 +16,10 @@ def normc_fn(m):
 class Net(nn.Module):
   def __init__(self):
     super(Net, self).__init__()
-    self.is_recurrent = False
 
     self.welford_state_mean = torch.zeros(1)
     self.welford_state_mean_diff = torch.ones(1)
     self.welford_state_n = 1
-
-    self.env_name = None
 
   def forward(self):
     raise NotImplementedError

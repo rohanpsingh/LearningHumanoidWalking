@@ -4,39 +4,56 @@ import transforms3d as tf3
 import collections
 
 from tasks import walking_task
+from robots.robot_base import RobotBase
 from envs.common import mujoco_env
 from envs.common import robot_interface
-from envs.jvrc import robot
+from envs.common import config_builder
 
-from .gen_xml import builder
-
+from .gen_xml import *
 
 class JvrcWalkEnv(mujoco_env.MujocoEnv):
-    def __init__(self):
-        sim_dt = 0.0025
-        control_dt = 0.025
+    def __init__(self, path_to_yaml = None):
+
+        ## Load CONFIG from yaml ##
+        if path_to_yaml is None:
+            path_to_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'configs/base.yaml')
+
+        self.cfg = config_builder.load_yaml(path_to_yaml)
+
+        sim_dt = self.cfg.sim_dt
+        control_dt = self.cfg.control_dt
         frame_skip = (control_dt/sim_dt)
 
-        path_to_xml_out = '/tmp/mjcf-export/jvrc_walk/jvrc1.xml'
-        if not os.path.exists(path_to_xml_out):
-            builder(path_to_xml_out)
-        mujoco_env.MujocoEnv.__init__(self, path_to_xml_out, sim_dt, control_dt)
+        self.history_len = self.cfg.obs_history_len
 
-        pdgains = np.zeros((12, 2))
-        coeff = 0.5
-        pdgains.T[0] = coeff * np.array([200, 200, 200, 250, 80, 80,
-                                         200, 200, 200, 250, 80, 80,])
-        pdgains.T[1] = coeff * np.array([20, 20, 20, 25, 8, 8,
-                                         20, 20, 20, 25, 8, 8,])
+        path_to_xml = '/tmp/mjcf-export/jvrc_walk/jvrc.xml'
+        if not os.path.exists(path_to_xml):
+            export_dir = os.path.dirname(path_to_xml)
+            builder(export_dir, config={
+            })
+
+        mujoco_env.MujocoEnv.__init__(self, path_to_xml, sim_dt, control_dt)
+
+        pdgains = np.zeros((2, 12))
+        pdgains[0] = self.cfg.kp
+        pdgains[1] = self.cfg.kd
 
         # list of desired actuators
         # RHIP_P, RHIP_R, RHIP_Y, RKNEE, RANKLE_R, RANKLE_P
         # LHIP_P, LHIP_R, LHIP_Y, LKNEE, LANKLE_R, LANKLE_P
-        self.actuators = [0, 1, 2, 3, 4, 5,
-                          6, 7, 8, 9, 10, 11]
+        self.actuators = LEG_JOINTS
+
+        # define nominal pose
+        base_position = [0, 0, 0.81]
+        base_orientation = [1, 0, 0, 0]
+        half_sitting_pose = [-30,  0, 0, 50, 0, -24,
+                             -30,  0, 0, 50, 0, -24,
+        ] # degrees
+        self.nominal_pose = base_position + base_orientation + np.deg2rad(half_sitting_pose).tolist()
 
         # set up interface
-        self.interface = robot_interface.RobotInterface(self.model, self.data, 'R_ANKLE_P_S', 'L_ANKLE_P_S')
+        self.interface = robot_interface.RobotInterface(self.model, self.data, 'R_ANKLE_P_S', 'L_ANKLE_P_S', None)
+
         # set up task
         self.task = walking_task.WalkingTask(client=self.interface,
                                              dt=control_dt,
@@ -50,18 +67,17 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.task._total_duration = 1.1
         self.task._swing_duration = 0.75
         self.task._stance_duration = 0.35
-        # call reset
-        self.task.reset()
 
-        self.robot = robot.JVRC(pdgains.T, control_dt, self.actuators, self.interface)
+        # set up robot
+        self.robot = RobotBase(pdgains, control_dt, self.interface, self.task)
 
         # define indices for action and obs mirror fns
-        base_mir_obs = [0.1, -1, 2, -3,              # root orient
-                        -4, 5, -6,                   # root ang vel
-                        13, -14, -15, 16, -17, 18,   # motor pos [1]
-                         7,  -8,  -9, 10, -11, 12,   # motor pos [2]
-                        25, -26, -27, 28, -29, 30,   # motor vel [1]
-                        19, -20, -21, 22, -23, 24,   # motor vel [2]
+        base_mir_obs = [-0.1, 1,                   # root orient
+                        -2, 3, -4,                 # root ang vel
+                        11, -12, -13, 14, -15, 16, # motor pos [1]
+                         5,  -6,  -7,  8,  -9, 10, # motor pos [2]
+                        23, -24, -25, 26, -27, 28, # motor vel [1]
+                        17, -18, -19, 20, -21, 22, # motor vel [2]
         ]
         append_obs = [(len(base_mir_obs)+i) for i in range(3)]
         self.robot.clock_inds = append_obs[0:2]
@@ -70,15 +86,31 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
                                     0.1, -1, -2, 3, -4, 5,]
 
         # set action space
-        action_space_size = len(self.robot.actuators)
+        action_space_size = len(self.actuators)
         action = np.zeros(action_space_size)
         self.action_space = np.zeros(action_space_size)
+        self.prev_prediction = np.zeros(action_space_size)
 
         # set observation space
-        self.base_obs_len = 34
-        self.observation_space = np.zeros(self.base_obs_len)
-        
-        self.reset_model()
+        self.base_obs_len = 32
+        self.observation_history = collections.deque(maxlen=self.history_len)
+        self.observation_space = np.zeros(self.base_obs_len*self.history_len)
+
+        # manually define observation mean and std
+        self.obs_mean = np.concatenate((
+            np.zeros(5),
+            np.deg2rad(half_sitting_pose), np.zeros(12),
+            [0.5, 0.5, 0.5]
+        ))
+
+        self.obs_std = np.concatenate((
+            [0.2, 0.2, 1, 1, 1],
+            0.5*np.ones(12), 4*np.ones(12),
+            [1, 1, 1,]
+        ))
+
+        self.obs_mean = np.tile(self.obs_mean, self.history_len)
+        self.obs_std = np.tile(self.obs_std, self.history_len)
 
     def get_obs(self):
         # external state
@@ -89,65 +121,59 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         # internal state
         qpos = np.copy(self.interface.get_qpos())
         qvel = np.copy(self.interface.get_qvel())
-
         root_r, root_p = tf3.euler.quat2euler(qpos[3:7])[0:2]
-        root_orient = tf3.euler.euler2quat(root_r, root_p, 0)
+        root_r = np.array([root_r])
+        root_p = np.array([root_p])
         root_ang_vel = qvel[3:6]
-
         motor_pos = self.interface.get_act_joint_positions()
         motor_vel = self.interface.get_act_joint_velocities()
-        motor_pos = [motor_pos[i] for i in self.actuators]
-        motor_vel = [motor_vel[i] for i in self.actuators]
 
         robot_state = np.concatenate([
-            root_orient,
-            root_ang_vel,
-            motor_pos,
-            motor_vel,
+            root_r, root_p, root_ang_vel, motor_pos, motor_vel,
         ])
+
         state = np.concatenate([robot_state, ext_state])
-        assert state.shape==(self.base_obs_len,)
-        return state.flatten()
+        assert state.shape==(self.base_obs_len,), \
+            "State vector length expected to be: {} but is {}".format(self.base_obs_len, len(state))
 
-    def step(self, a):
-        # make one control step
-        applied_action = self.robot.step(a)
+        if len(self.observation_history)==0:
+            for _ in range(self.history_len):
+                self.observation_history.appendleft(np.zeros_like(state))
+            self.observation_history.appendleft(state)
+        else:
+            self.observation_history.appendleft(state)
+        return np.array(self.observation_history).flatten()
 
-        # compute reward
-        self.task.step()
-        rewards = self.task.calc_reward(self.robot.prev_torque, self.robot.prev_action, applied_action)
-        total_reward = sum([float(i) for i in rewards.values()])
+    def step(self, action):
+        # Compute the applied action to actuators
+        # (targets <- Policy predictions)
+        targets = self.cfg.action_smoothing * action + \
+            (1 - self.cfg.action_smoothing) * self.prev_prediction
+        # (offsets <- Half-sitting pose)
+        offsets = [
+            self.nominal_pose[self.interface.get_jnt_qposadr_by_name(jnt)[0]]
+            for jnt in self.actuators
+        ]
 
-        # check if terminate
-        done = self.task.done()
-
+        rewards, done = self.robot.step(targets, np.asarray(offsets))
         obs = self.get_obs()
-        return obs, total_reward, done, rewards
+
+        self.prev_prediction = action
+
+        return obs, sum(rewards.values()), done, rewards
 
     def reset_model(self):
-        '''
-        # dynamics randomization
-        dofadr = [self.interface.get_jnt_qveladr_by_name(jn)
-                  for jn in self.interface.get_actuated_joint_names()]
-        for jnt in dofadr:
-            self.model.dof_frictionloss[jnt] = np.random.uniform(0,10)    # actuated joint frictionloss
-            self.model.dof_damping[jnt] = np.random.uniform(0.2,5)        # actuated joint damping
-            self.model.dof_armature[jnt] *= np.random.uniform(0.90, 1.10) # actuated joint armature
-        '''
+        init_qpos, init_qvel = self.nominal_pose.copy(), [0] * self.interface.nv()
 
-        c = 0.02
-        self.init_qpos = list(self.robot.init_qpos_)
-        self.init_qvel = list(self.robot.init_qvel_)
-        self.init_qpos = self.init_qpos + np.random.uniform(low=-c, high=c, size=self.model.nq)
-        self.init_qvel = self.init_qvel + np.random.uniform(low=-c, high=c, size=self.model.nv)
-
-        # modify init state acc to task
-        root_adr = self.interface.get_jnt_qposadr_by_name('root')[0]
-        self.init_qpos[root_adr+2] = 0.81
+        # set up init state
         self.set_state(
-            np.asarray(self.init_qpos),
-            np.asarray(self.init_qvel)
+            np.asarray(init_qpos),
+            np.asarray(init_qvel)
         )
+
+        self.task.reset(iter_count=self.robot.iteration_count)
+
+        self.prev_prediction = np.zeros_like(self.prev_prediction)
+        self.observation_history = collections.deque(maxlen=self.history_len)
         obs = self.get_obs()
-        self.task.reset()
         return obs

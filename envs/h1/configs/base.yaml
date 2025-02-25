@@ -1,0 +1,38 @@
+sim_dt: 0.001
+control_dt: 0.025
+obs_history_len: 1
+action_smoothing: 0.5
+
+ctrllimited: false
+jointlimited: false
+reduced_xml: true
+
+init_noise: 3
+
+kp: [100, 100, 100, 100, 20,
+    100, 100, 100, 100, 20]
+kd: [10, 10, 10, 10, 4,
+    10, 10, 10, 10, 4]
+
+observation_noise:
+  enabled: true
+  multiplier: 1.0
+  type:  "uniform" # or "gaussian"
+  scales:
+    root_orient: 0.05
+    root_ang_vel: 0.05
+    motor_pos: 0.02
+    motor_vel: 0.05
+    motor_tau: 5.0
+
+perturbation:
+  enable: true
+  bodies: ["pelvis", "torso_link"]
+  force_magnitude: 10
+  torque_magnitude: 2
+  interval: 5
+
+dynamics_randomization:
+  enable: true
+  interval: 0.5
+

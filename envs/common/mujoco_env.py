@@ -1,3 +1,4 @@
+import contextlib
 import os
 import numpy as np
 import mujoco
@@ -16,7 +17,10 @@ class MujocoEnv():
             raise Exception("Provide full path to robot description package.")
         if not os.path.exists(fullpath):
             raise IOError("File %s does not exist" % fullpath)
-        self.model = mujoco.MjModel.from_xml_path(fullpath)
+
+        self.spec = mujoco.MjSpec()
+        self.spec.from_file(fullpath)
+        self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
         self.viewer = None
 
@@ -48,13 +52,53 @@ class MujocoEnv():
         self.viewer.cam.lookat[2] = 1.5
         self.viewer.cam.lookat[0] = 2.0
         self.viewer.cam.elevation = -20
-        self.viewer.vopt.geomgroup[0] = 1
+        self.viewer.vopt.geomgroup[2] = 0
         self.viewer._render_every_frame = True
 
     def viewer_is_paused(self):
         return self.viewer._paused
 
     # -----------------------------
+    # (some methods are taken directly from dm_control)
+
+    @contextlib.contextmanager
+    def disable(self, *flags):
+      """Context manager for temporarily disabling MuJoCo flags.
+
+      Args:
+        *flags: Positional arguments specifying flags to disable. Can be either
+          lowercase strings (e.g. 'gravity', 'contact') or `mjtDisableBit` enum
+          values.
+
+      Yields:
+        None
+
+      Raises:
+        ValueError: If any item in `flags` is neither a valid name nor a value
+          from `mujoco.mjtDisableBit`.
+      """
+      old_bitmask = self.model.opt.disableflags
+      new_bitmask = old_bitmask
+      for flag in flags:
+        if isinstance(flag, str):
+          try:
+            field_name = "mjDSBL_" + flag.upper()
+            flag = getattr(mujoco.mjtDisableBit, field_name)
+          except AttributeError:
+            valid_names = [
+                field_name.split("_")[1].lower()
+                for field_name in list(mujoco.mjtDisableBit.__members__)[:-1]
+            ]
+            raise ValueError("'{}' is not a valid flag name. Valid names: {}"
+                             .format(flag, ", ".join(valid_names))) from None
+        elif isinstance(flag, int):
+          flag = mujoco.mjtDisableBit(flag)
+        new_bitmask |= flag.value
+      self.model.opt.disableflags = new_bitmask
+      try:
+        yield
+      finally:
+        self.model.opt.disableflags = old_bitmask
 
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
@@ -62,10 +106,17 @@ class MujocoEnv():
         return ob
 
     def set_state(self, qpos, qvel):
-        assert qpos.shape == (self.model.nq,) and qvel.shape == (self.model.nv,)
+        assert qpos.shape == (self.model.nq,), \
+            f"qpos shape {qpos.shape} is expected to be {(self.model.nq,)}"
+        assert qvel.shape == (self.model.nv,), \
+            f"qvel shape {qvel.shape} is expected to be {(self.model.nv,)}"
         self.data.qpos[:] = qpos
         self.data.qvel[:] = qvel
-        mujoco.mj_forward(self.model, self.data)
+        self.data.act = []
+        self.data.plugin_state = []
+        # Disable actuation since we don't yet have meaningful control inputs.
+        with self.disable('actuation'):
+            mujoco.mj_forward(self.model, self.data)
 
     @property
     def dt(self):

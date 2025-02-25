@@ -1,12 +1,19 @@
 # LearningHumanoidWalking
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=ZgfNzGAkk2Q"><img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" alt="humanoid-walk" style="width:1000px"/></a>
+</p>
+
 Code for the papers:  
-- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf) (Humanoids2022)  
+- [**Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning**](https://ieeexplore.ieee.org/abstract/document/10769793)  
+[Rohan P. Singh](https://rohanpsingh.github.io), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Zhaoming Xie](https://zhaomingxie.github.io/), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
+
+- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)  
+[Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
+
+- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)  
 [Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
-- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf) (arxiv)  
-[Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)  
-(WIP on branch `topic/omnidirectional-walk`)
 
 ## Code structure:
 A rough outline for the repository that might be useful for adding your own robot:
@@ -16,19 +23,18 @@ LearningHumanoidWalking/
 ├── tasks/               <-- Reward function, termination conditions, and more...
 ├── rl/                  <-- Code for PPO, actor/critic networks, observation normalization process...
 ├── models/              <-- MuJoCo model files: XMLs/meshes/textures
-├── trained/             <-- Contains pretrained model for JVRC
 └── scripts/             <-- Utility scripts, etc.
 ```
 
 ## Requirements:
-- Python version: 3.7.11  
-- [Pytorch](https://pytorch.org/)
+- Python version: 3.12.4
 - pip install:
-  - mujoco==2.2.0
+  - mujoco==3.2.2
+  - ray==2.40.0
+  - pytorch=2.5.1
+  - intel-openmp
   - [mujoco-python-viewer](https://github.com/rohanpsingh/mujoco-python-viewer)
-  - ray==1.9.2
   - transforms3d
-  - matplotlib
   - scipy
 
 ## Usage:
@@ -37,6 +43,7 @@ Environment names supported:
 
 | Task Description      | Environment name |
 | ----------- | ----------- |
+| Basic Standing Task   | 'h1' |
 | Basic Walking Task   | 'jvrc_walk' |
 | Stepping Task (using footsteps)  | 'jvrc_step' |
 
@@ -69,7 +76,35 @@ $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_d
 
 
 ## Citation
-If you find this work useful in your own research:
+If you find this work useful in your own research, please cite the following works:
+
+For omnidirectional walking:
+```
+@inproceedings{singh2024robust,
+  title={Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning},
+  author={Singh, Rohan P and Morisawa, Mitsuharu and Benallegue, Mehdi and Xie, Zhaoming and Kanehiro, Fumio},
+  booktitle={2024 IEEE-RAS 23rd International Conference on Humanoid Robots (Humanoids)},
+  pages={497--504},
+  year={2024},
+  organization={IEEE}
+}
+```
+
+For simulating "back-emf" effect and other randomizations:
+```
+@article{xie2023learning,
+  title={Learning bipedal walking for humanoids with current feedback},
+  author={Xie, Zhaoming and Gergondet, Pierre and Kanehiro, Fumio and others},
+  journal={IEEE Access},
+  volume={11},
+  pages={82013--82023},
+  year={2023},
+  publisher={IEEE}
+}
+```
+
+For walking on footsteps:  
+
 ```
 @inproceedings{singh2022learning,
   title={Learning Bipedal Walking On Planned Footsteps For Humanoid Robots},
