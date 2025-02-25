@@ -1,15 +1,14 @@
 # LearningHumanoidWalking
 
 Code for the papers:  
-- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf) (Humanoids2022)  
+- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)  
 [Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
-- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf) (arxiv)  
-[Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)  
-(WIP on branch `topic/omnidirectional-walk`)
+- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)  
+[Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" />
+  <img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" href="https://www.youtube.com/watch?v=ZgfNzGAkk2Q" />
 </p>
 
 
@@ -28,11 +27,12 @@ LearningHumanoidWalking/
 - Python version: 3.7.11  
 - [Pytorch](https://pytorch.org/)
 - pip install:
-  - mujoco==2.2.0
+  - mujoco==3.2.2
+  - ray==2.40.0
+  - pytorch=2.5.1
+  - intel-openmp
   - [mujoco-python-viewer](https://github.com/rohanpsingh/mujoco-python-viewer)
-  - ray==1.9.2
   - transforms3d
-  - matplotlib
   - scipy
 
 ## Usage:
@@ -88,7 +88,7 @@ For omnidirectional walking:
 }
 ```
 
-For simulating "back-emf" effect:
+For simulating "back-emf" effect and other randomizations:
 ```
 @article{xie2023learning,
   title={Learning bipedal walking for humanoids with current feedback},
