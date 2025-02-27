@@ -57,7 +57,11 @@ $ python run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_
 
 #### **To play:**
 
-We need to write a script specific to each environment.    
+```
+$ python run_experiment.py eval --logdir <path_to_actor_pt>
+```
+
+Or, we could write a rollout script specific to each environment.    
 For example, `debug_stepper.py` can be used with the `jvrc_step` environment.  
 ```
 $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_dir>
@@ -115,4 +119,7 @@ For walking on footsteps:
   organization={IEEE}
 }
 ```
+
+### Credits
+The code in this repository was heavily inspired from [apex](https://github.com/osudrl/apex). Clock-based reward terms and some other ideas were originally proposed by the team from OSU DRL for the Cassie robot, so please also cite the works of Jonah Siekmann, Helei Duan, Jereme Dao and others.
 
