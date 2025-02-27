@@ -109,14 +109,11 @@ class H1Env(mujoco_env.MujocoEnv):
         self.model.body("pelvis").mass = 8.89
         self.model.body("torso_link").mass = 21.289
 
-        pdgains = np.zeros((2, 10))
-        pdgains[0] = self.cfg.kp
-        pdgains[1] = self.cfg.kd
-
         # list of desired actuators
         self.leg_names = LEG_JOINTS
-        self.torso_names = WAIST_JOINTS
-        self.arm_names = ARM_JOINTS
+        gains_dict = self.cfg.pdgains.to_dict()
+        kp, kd = zip(*[gains_dict[jn] for jn in self.leg_names])
+        pdgains = np.array([kp, kd])
 
         # define nominal pose
         base_position = [0, 0, 0.98]
