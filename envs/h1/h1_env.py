@@ -26,7 +26,7 @@ class Task:
 
         # upperbody reward
         head_pose_offset = np.zeros(2)
-        head_pose = self._client.get_object_affine_by_name("head", 'OBJ_GEOM')
+        head_pose = self._client.get_object_affine_by_name("head_link", 'OBJ_BODY')
         head_pos_in_robot_base = np.linalg.inv(root_pose).dot(head_pose)[:2, 3] - head_pose_offset
         upperbody_error = np.linalg.norm(head_pos_in_robot_base)
 
