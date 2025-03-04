@@ -121,5 +121,5 @@ For walking on footsteps:
 ```
 
 ### Credits
-The code in this repository was heavily inspired from [apex](https://github.com/osudrl/apex). Clock-based reward terms and some other ideas were originally proposed by the team from OSU DRL for the Cassie robot, so please also cite the works of Jonah Siekmann, Helei Duan, Jereme Dao and others.
+The code in this repository was heavily inspired from [apex](https://github.com/osudrl/apex). Clock-based reward terms and some other ideas were originally proposed by the team from OSU DRL for the Cassie robot, so please also consider citing the works of Jonah Siekmann, Helei Duan, Jeremy Dao, and others.
 
