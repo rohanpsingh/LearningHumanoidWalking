@@ -1,0 +1,17 @@
+[project]
+name = "learninghumanoidwalking"
+version = "0.1.0"
+description = "Training a humanoid robot for locomotion using Reinforcement Learning "
+readme = "README.md"
+requires-python = "==3.12.4"
+dependencies = [
+    "dm-control>=1.0.24",
+    "imageio[ffmpeg]>=2.37.0",
+    "intel-openmp>=2025.2.1",
+    "mujoco==3.2.2",
+    "mujoco-python-viewer>=0.1.4",
+    "ray==2.40.0",
+    "tensorboard>=2.20.0",
+    "torch==2.5.1",
+    "transforms3d>=0.4.2",
+]
