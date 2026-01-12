@@ -1,9 +1,10 @@
 [project]
 name = "learninghumanoidwalking"
 version = "0.1.0"
-description = "Training a humanoid robot for locomotion using Reinforcement Learning "
+description = "Training a humanoid robot for locomotion using Reinforcement Learning"
 readme = "README.md"
-requires-python = "==3.12.4"
+license = "BSD-2-Clause"
+requires-python = ">=3.12"
 dependencies = [
     "dm-control>=1.0.24",
     "imageio[ffmpeg]>=2.37.0",
@@ -15,3 +16,10 @@ dependencies = [
     "torch==2.5.1",
     "transforms3d>=0.4.2",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []
