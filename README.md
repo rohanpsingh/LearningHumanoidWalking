@@ -27,15 +27,12 @@ LearningHumanoidWalking/
 ```
 
 ## Requirements:
-- Python version: 3.12.4
-- pip install:
-  - mujoco==3.2.2
-  - ray==2.40.0
-  - pytorch=2.5.1
-  - intel-openmp
-  - [mujoco-python-viewer](https://github.com/rohanpsingh/mujoco-python-viewer)
-  - transforms3d
-  - scipy
+- Python version: >= 3.10
+- [uv](https://docs.astral.sh/uv/) package manager
+
+```bash
+uv sync
+```
 
 ## Usage:
 

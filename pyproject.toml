@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Training a humanoid robot for locomotion using Reinforcement Learning"
 readme = "README.md"
 license = "BSD-2-Clause"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "dm-control>=1.0.24",
     "imageio[ffmpeg]>=2.37.0",
