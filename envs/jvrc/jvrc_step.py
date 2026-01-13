@@ -99,6 +99,26 @@ class JvrcStepEnv(JvrcWalkEnv):
         self.observation_history = collections.deque(maxlen=self.history_len)
         self.observation_space = np.zeros(self.base_obs_len*self.history_len)
 
+        # manually define observation mean and std
+        # Observation structure: root_r(1), root_p(1), root_ang_vel(3), motor_pos(12), motor_vel(12),
+        #                        clock(2), goal_steps_x(2), goal_steps_y(2), goal_steps_z(2), goal_steps_theta(2)
+        self.obs_mean = np.concatenate((
+            np.zeros(5),  # root_r, root_p, root_ang_vel
+            np.deg2rad(half_sitting_pose), np.zeros(12),  # motor_pos, motor_vel
+            [0.5, 0.5],  # clock
+            np.zeros(8),  # goal step coords (x, y, z, theta for 2 steps)
+        ))
+
+        self.obs_std = np.concatenate((
+            [0.2, 0.2, 1, 1, 1],  # root orient and ang vel
+            0.5*np.ones(12), 4*np.ones(12),  # motor pos and vel
+            [1, 1],  # clock
+            np.ones(8),  # goal step coords
+        ))
+
+        self.obs_mean = np.tile(self.obs_mean, self.history_len)
+        self.obs_std = np.tile(self.obs_std, self.history_len)
+
     def get_obs(self):
         # external state
         clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
