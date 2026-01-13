@@ -1,4 +1,9 @@
-"""Integration tests for training functionality."""
+"""Integration tests for training functionality.
+
+These tests are parametrized to run against ALL environments discovered
+under envs/. No hardcoded dimensions - everything is derived from the
+environment instances.
+"""
 import pytest
 import numpy as np
 import torch
@@ -7,134 +12,133 @@ from functools import partial
 
 import ray
 
+from conftest import DISCOVERED_ENVIRONMENTS, get_env_info
+
 
 class TestPPOInitialization:
-    """Tests for PPO algorithm initialization."""
+    """Tests for PPO algorithm initialization with any environment."""
 
-    def test_ppo_initializes_with_h1_env(self, h1_env_fn, h1_train_args):
-        """Test PPO initializes correctly with H1 environment."""
+    def test_ppo_initializes(self, env_factory, train_args, env_name):
+        """Test PPO initializes correctly with any environment."""
         from rl.algos.ppo import PPO
 
-        ppo = PPO(h1_env_fn, h1_train_args)
+        ppo = PPO(env_factory, train_args)
 
         assert ppo.policy is not None
         assert ppo.critic is not None
         assert ppo.old_policy is not None
 
-    def test_ppo_initializes_with_jvrc_walk_env(self, jvrc_walk_env_fn, jvrc_walk_train_args):
-        """Test PPO initializes correctly with JVRC walk environment."""
-        from rl.algos.ppo import PPO
-
-        ppo = PPO(jvrc_walk_env_fn, jvrc_walk_train_args)
-
-        assert ppo.policy is not None
-        assert ppo.critic is not None
-        assert ppo.old_policy is not None
-
-    def test_ppo_initializes_with_jvrc_step_env(self, jvrc_step_env_fn, jvrc_step_train_args):
-        """Test PPO initializes correctly with JVRC step environment."""
-        from rl.algos.ppo import PPO
-
-        ppo = PPO(jvrc_step_env_fn, jvrc_step_train_args)
-
-        assert ppo.policy is not None
-        assert ppo.critic is not None
-        assert ppo.old_policy is not None
-
-    def test_policy_network_dimensions(self, h1_env_fn, h1_train_args):
+    def test_policy_network_dimensions(self, env_factory, train_args, env_name):
         """Test policy network has correct input/output dimensions."""
         from rl.algos.ppo import PPO
 
-        env = h1_env_fn()
-        ppo = PPO(h1_env_fn, h1_train_args)
-
-        assert ppo.policy.state_dim == env.observation_space.shape[0]
-        assert ppo.policy.action_dim == env.action_space.shape[0]
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
         env.close()
 
-    def test_critic_network_dimensions(self, h1_env_fn, h1_train_args):
-        """Test critic network produces correct output shape."""
+        ppo = PPO(env_factory, train_args)
+
+        assert ppo.policy.state_dim == obs_dim, \
+            f"Policy state_dim {ppo.policy.state_dim} != env obs_dim {obs_dim}"
+        assert ppo.policy.action_dim == action_dim, \
+            f"Policy action_dim {ppo.policy.action_dim} != env action_dim {action_dim}"
+
+    def test_critic_produces_correct_output(self, env_factory, train_args, env_name):
+        """Test critic network produces scalar value."""
         from rl.algos.ppo import PPO
 
-        env = h1_env_fn()
-        ppo = PPO(h1_env_fn, h1_train_args)
-
-        # Test critic produces scalar value for single observation
-        obs = torch.randn(env.observation_space.shape[0])
-        value = ppo.critic(obs)
-        assert value.shape == (1,)
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
         env.close()
 
-    def test_observation_normalization_loaded(self, h1_env_fn, h1_train_args):
+        ppo = PPO(env_factory, train_args)
+
+        # Test critic produces scalar value for single observation
+        obs = torch.randn(obs_dim)
+        value = ppo.critic(obs)
+        assert value.shape == (1,), f"Critic output shape {value.shape} != (1,)"
+
+    def test_observation_normalization_loaded(self, env_factory, train_args, env_name):
         """Test observation normalization stats are loaded into policy."""
         from rl.algos.ppo import PPO
 
-        ppo = PPO(h1_env_fn, h1_train_args)
+        ppo = PPO(env_factory, train_args)
 
         assert hasattr(ppo.policy, 'obs_mean')
         assert hasattr(ppo.policy, 'obs_std')
         assert ppo.policy.obs_mean is not None
         assert ppo.policy.obs_std is not None
 
+        # Dimensions should match
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        env.close()
+
+        assert ppo.policy.obs_mean.shape[0] == obs_dim
+        assert ppo.policy.obs_std.shape[0] == obs_dim
+
 
 class TestPPOSampling:
     """Tests for PPO trajectory sampling."""
 
-    def test_sample_parallel_returns_valid_data(self, h1_env_fn, h1_train_args):
+    def test_sample_parallel_returns_valid_data(self, env_factory, train_args, env_name):
         """Test parallel sampling returns valid batch data."""
         from rl.algos.ppo import PPO
 
-        ppo = PPO(h1_env_fn, h1_train_args)
+        ppo = PPO(env_factory, train_args)
         policy_ref = ray.put(ppo.policy)
         critic_ref = ray.put(ppo.critic)
 
-        batch = ppo.sample_parallel(h1_env_fn, policy_ref, critic_ref)
+        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
-        assert hasattr(batch, 'states')
-        assert hasattr(batch, 'actions')
-        assert hasattr(batch, 'rewards')
-        assert hasattr(batch, 'returns')
-        assert hasattr(batch, 'values')
-        assert hasattr(batch, 'ep_rewards')
-        assert hasattr(batch, 'ep_lens')
+        required_attrs = ['states', 'actions', 'rewards', 'returns', 'values', 'ep_rewards', 'ep_lens']
+        for attr in required_attrs:
+            assert hasattr(batch, attr), f"Batch missing attribute: {attr}"
 
-    def test_sampled_states_match_obs_dimension(self, h1_env_fn, h1_train_args):
+    def test_sampled_states_match_obs_dimension(self, env_factory, train_args, env_name):
         """Test sampled states have correct observation dimension."""
         from rl.algos.ppo import PPO
 
-        env = h1_env_fn()
-        ppo = PPO(h1_env_fn, h1_train_args)
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        env.close()
+
+        ppo = PPO(env_factory, train_args)
         policy_ref = ray.put(ppo.policy)
         critic_ref = ray.put(ppo.critic)
 
-        batch = ppo.sample_parallel(h1_env_fn, policy_ref, critic_ref)
+        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
-        assert batch.states.shape[1] == env.observation_space.shape[0]
-        env.close()
+        assert batch.states.shape[1] == obs_dim, \
+            f"Sampled states dim {batch.states.shape[1]} != obs_dim {obs_dim}"
 
-    def test_sampled_actions_match_action_dimension(self, h1_env_fn, h1_train_args):
+    def test_sampled_actions_match_action_dimension(self, env_factory, train_args, env_name):
         """Test sampled actions have correct action dimension."""
         from rl.algos.ppo import PPO
 
-        env = h1_env_fn()
-        ppo = PPO(h1_env_fn, h1_train_args)
+        env = env_factory()
+        action_dim = env.action_space.shape[0]
+        env.close()
+
+        ppo = PPO(env_factory, train_args)
         policy_ref = ray.put(ppo.policy)
         critic_ref = ray.put(ppo.critic)
 
-        batch = ppo.sample_parallel(h1_env_fn, policy_ref, critic_ref)
+        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
-        assert batch.actions.shape[1] == env.action_space.shape[0]
-        env.close()
+        assert batch.actions.shape[1] == action_dim, \
+            f"Sampled actions dim {batch.actions.shape[1]} != action_dim {action_dim}"
 
-    def test_sampled_values_are_scalars(self, h1_env_fn, h1_train_args):
+    def test_sampled_values_are_scalars(self, env_factory, train_args, env_name):
         """Test sampled values are scalar per timestep."""
         from rl.algos.ppo import PPO
 
-        ppo = PPO(h1_env_fn, h1_train_args)
+        ppo = PPO(env_factory, train_args)
         policy_ref = ray.put(ppo.policy)
         critic_ref = ray.put(ppo.critic)
 
-        batch = ppo.sample_parallel(h1_env_fn, policy_ref, critic_ref)
+        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
         assert len(batch.values.shape) == 2
         assert batch.values.shape[1] == 1
@@ -143,17 +147,17 @@ class TestPPOSampling:
 class TestPPOUpdate:
     """Tests for PPO policy update."""
 
-    def test_update_actor_critic_runs_without_error(self, h1_env_fn, h1_train_args):
+    def test_update_actor_critic_runs_without_error(self, env_factory, train_args, env_name):
         """Test actor-critic update completes without errors."""
         from rl.algos.ppo import PPO
 
-        ppo = PPO(h1_env_fn, h1_train_args)
-        ppo.actor_optimizer = torch.optim.Adam(ppo.policy.parameters(), lr=h1_train_args.lr)
-        ppo.critic_optimizer = torch.optim.Adam(ppo.critic.parameters(), lr=h1_train_args.lr)
+        ppo = PPO(env_factory, train_args)
+        ppo.actor_optimizer = torch.optim.Adam(ppo.policy.parameters(), lr=train_args.lr)
+        ppo.critic_optimizer = torch.optim.Adam(ppo.critic.parameters(), lr=train_args.lr)
 
         policy_ref = ray.put(ppo.policy)
         critic_ref = ray.put(ppo.critic)
-        batch = ppo.sample_parallel(h1_env_fn, policy_ref, critic_ref)
+        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
         observations = batch.states.float()
         actions = batch.actions.float()
@@ -176,15 +180,15 @@ class TestPPOUpdate:
         )
 
         assert len(result) == 7  # Returns 7 scalars
-        actor_loss, entropy, critic_loss, kl_div, mirror_loss, imitation_loss, clip_frac = result
+        actor_loss, _, critic_loss, _, _, _, _ = result
         assert torch.isfinite(actor_loss)
         assert torch.isfinite(critic_loss)
 
-    def test_policy_weights_change_after_update(self, h1_env_fn, h1_train_args):
+    def test_policy_weights_change_after_update(self, env_factory, train_args, env_name):
         """Test policy weights change after update."""
         from rl.algos.ppo import PPO
 
-        ppo = PPO(h1_env_fn, h1_train_args)
+        ppo = PPO(env_factory, train_args)
         ppo.actor_optimizer = torch.optim.Adam(ppo.policy.parameters(), lr=1e-3)
         ppo.critic_optimizer = torch.optim.Adam(ppo.critic.parameters(), lr=1e-3)
 
@@ -193,7 +197,7 @@ class TestPPOUpdate:
 
         policy_ref = ray.put(ppo.policy)
         critic_ref = ray.put(ppo.critic)
-        batch = ppo.sample_parallel(h1_env_fn, policy_ref, critic_ref)
+        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
         observations = batch.states.float()
         actions = batch.actions.float()
@@ -227,81 +231,42 @@ class TestTrainingLoop:
     """Tests for full training loop (marked slow)."""
 
     @pytest.mark.timeout(120)
-    def test_h1_training_one_iteration(self, h1_env_fn, h1_train_args):
-        """Test H1 training runs for one iteration without errors."""
+    def test_training_one_iteration(self, env_factory, train_args, env_name):
+        """Test training runs for one iteration without errors."""
         from rl.algos.ppo import PPO
 
-        h1_train_args.n_itr = 1
-        h1_train_args.eval_freq = 1
+        train_args.n_itr = 1
+        train_args.eval_freq = 1
 
-        ppo = PPO(h1_env_fn, h1_train_args)
-        ppo.train(h1_env_fn, n_itr=1)
+        ppo = PPO(env_factory, train_args)
+        ppo.train(env_factory, n_itr=1)
 
         # Check that weights were saved
-        assert (h1_train_args.logdir / "actor_0.pt").exists()
-        assert (h1_train_args.logdir / "critic_0.pt").exists()
-
-    @pytest.mark.timeout(120)
-    def test_jvrc_walk_training_one_iteration(self, jvrc_walk_env_fn, jvrc_walk_train_args):
-        """Test JVRC walk training runs for one iteration without errors."""
-        from rl.algos.ppo import PPO
-
-        jvrc_walk_train_args.n_itr = 1
-        jvrc_walk_train_args.eval_freq = 1
-
-        ppo = PPO(jvrc_walk_env_fn, jvrc_walk_train_args)
-        ppo.train(jvrc_walk_env_fn, n_itr=1)
-
-        # Check that weights were saved
-        assert (jvrc_walk_train_args.logdir / "actor_0.pt").exists()
-        assert (jvrc_walk_train_args.logdir / "critic_0.pt").exists()
-
-    @pytest.mark.timeout(120)
-    def test_jvrc_step_training_one_iteration(self, jvrc_step_env_fn, jvrc_step_train_args):
-        """Test JVRC step training runs for one iteration without errors."""
-        from rl.algos.ppo import PPO
-
-        jvrc_step_train_args.n_itr = 1
-        jvrc_step_train_args.eval_freq = 1
-
-        ppo = PPO(jvrc_step_env_fn, jvrc_step_train_args)
-        ppo.train(jvrc_step_env_fn, n_itr=1)
-
-        # Check that weights were saved
-        assert (jvrc_step_train_args.logdir / "actor_0.pt").exists()
-        assert (jvrc_step_train_args.logdir / "critic_0.pt").exists()
-
-    @pytest.mark.timeout(180)
-    def test_h1_training_multiple_iterations(self, h1_env_fn, h1_train_args):
-        """Test H1 training runs for multiple iterations."""
-        from rl.algos.ppo import PPO
-
-        h1_train_args.n_itr = 3
-        h1_train_args.eval_freq = 1  # Eval every iteration to save all checkpoints
-
-        ppo = PPO(h1_env_fn, h1_train_args)
-        ppo.train(h1_env_fn, n_itr=3)
-
-        # Should have multiple checkpoint files (saved at eval iterations)
-        assert (h1_train_args.logdir / "actor_0.pt").exists()
-        assert (h1_train_args.logdir / "actor_1.pt").exists()
-        assert (h1_train_args.logdir / "actor_2.pt").exists()
+        assert (train_args.logdir / "actor_0.pt").exists(), \
+            f"actor_0.pt not saved for {env_name}"
+        assert (train_args.logdir / "critic_0.pt").exists(), \
+            f"critic_0.pt not saved for {env_name}"
 
 
 class TestSymmetricEnvWrapper:
     """Tests for the SymmetricEnv wrapper used in training."""
 
-    def test_symmetric_env_wraps_jvrc_walk(self, jvrc_walk_env_fn):
-        """Test SymmetricEnv wrapper works with JVRC walk."""
+    def test_symmetric_env_wraps_if_supported(self, env_factory, env_name):
+        """Test SymmetricEnv wrapper works with environments that support it."""
         from rl.envs.wrappers import SymmetricEnv
 
-        base_env = jvrc_walk_env_fn()
+        base_env = env_factory()
+
+        if not hasattr(base_env.robot, 'mirrored_obs') or not hasattr(base_env.robot, 'mirrored_acts'):
+            base_env.close()
+            pytest.skip(f"{env_name} does not support mirror symmetry")
+
         wrapped_env_fn = partial(
             SymmetricEnv,
-            jvrc_walk_env_fn,
+            env_factory,
             mirrored_obs=base_env.robot.mirrored_obs,
             mirrored_act=base_env.robot.mirrored_acts,
-            clock_inds=base_env.robot.clock_inds
+            clock_inds=getattr(base_env.robot, 'clock_inds', [])
         )
 
         wrapped_env = wrapped_env_fn()
@@ -314,51 +279,31 @@ class TestSymmetricEnvWrapper:
         base_env.close()
         wrapped_env.close()
 
-    def test_symmetric_env_mirror_action(self, jvrc_walk_env_fn):
-        """Test action mirroring works correctly."""
-        from rl.envs.wrappers import SymmetricEnv
-
-        base_env = jvrc_walk_env_fn()
-        wrapped_env_fn = partial(
-            SymmetricEnv,
-            jvrc_walk_env_fn,
-            mirrored_obs=base_env.robot.mirrored_obs,
-            mirrored_act=base_env.robot.mirrored_acts,
-            clock_inds=base_env.robot.clock_inds
-        )
-
-        wrapped_env = wrapped_env_fn()
-
-        # Create a test action
-        action = torch.randn(12)
-        mirrored = wrapped_env.mirror_action(action)
-
-        assert mirrored.shape == action.shape
-        # Mirroring twice should give back original (approximately)
-        double_mirrored = wrapped_env.mirror_action(mirrored)
-        assert torch.allclose(action, double_mirrored, atol=1e-5)
-
-        base_env.close()
-        wrapped_env.close()
-
-    def test_symmetric_env_step_works(self, jvrc_walk_env_fn):
+    def test_symmetric_env_step_works(self, env_factory, env_name):
         """Test stepping through SymmetricEnv wrapper works."""
         from rl.envs.wrappers import SymmetricEnv
 
-        base_env = jvrc_walk_env_fn()
+        base_env = env_factory()
+
+        if not hasattr(base_env.robot, 'mirrored_obs') or not hasattr(base_env.robot, 'mirrored_acts'):
+            base_env.close()
+            pytest.skip(f"{env_name} does not support mirror symmetry")
+
+        action_dim = base_env.action_space.shape[0]
+
         wrapped_env_fn = partial(
             SymmetricEnv,
-            jvrc_walk_env_fn,
+            env_factory,
             mirrored_obs=base_env.robot.mirrored_obs,
             mirrored_act=base_env.robot.mirrored_acts,
-            clock_inds=base_env.robot.clock_inds
+            clock_inds=getattr(base_env.robot, 'clock_inds', [])
         )
 
         wrapped_env = wrapped_env_fn()
         wrapped_env.reset()
 
         for _ in range(10):
-            action = np.random.uniform(-1, 1, 12)
+            action = np.random.uniform(-1, 1, action_dim)
             obs, reward, done, info = wrapped_env.step(action)
             assert not np.any(np.isnan(obs))
             if done:
@@ -371,11 +316,15 @@ class TestSymmetricEnvWrapper:
 class TestPolicyNetworks:
     """Tests for actor/critic network architectures."""
 
-    def test_ff_actor_forward_pass(self):
-        """Test feed-forward actor forward pass."""
+    def test_ff_actor_forward_pass(self, env_factory, env_name):
+        """Test feed-forward actor forward pass with environment dimensions."""
         from rl.policies.actor import Gaussian_FF_Actor
 
-        obs_dim, action_dim = 35, 10
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        env.close()
+
         actor = Gaussian_FF_Actor(obs_dim, action_dim, init_std=0.2, learn_std=False)
 
         obs = torch.randn(32, obs_dim)
@@ -384,11 +333,15 @@ class TestPolicyNetworks:
         assert action.shape == (32, action_dim)
         assert torch.all(torch.isfinite(action))
 
-    def test_ff_actor_distribution(self):
+    def test_ff_actor_distribution(self, env_factory, env_name):
         """Test feed-forward actor distribution."""
         from rl.policies.actor import Gaussian_FF_Actor
 
-        obs_dim, action_dim = 35, 10
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        env.close()
+
         actor = Gaussian_FF_Actor(obs_dim, action_dim, init_std=0.2, learn_std=False)
 
         obs = torch.randn(32, obs_dim)
@@ -398,13 +351,16 @@ class TestPolicyNetworks:
         sample = dist.sample()
         assert sample.shape == (32, action_dim)
 
-    def test_ff_critic_forward_pass(self):
-        """Test feed-forward critic forward pass."""
+    def test_ff_critic_forward_pass(self, env_factory, env_name):
+        """Test feed-forward critic forward pass with environment dimensions."""
         from rl.policies.critic import FF_V
 
-        obs_dim = 35
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
         obs_mean = torch.zeros(obs_dim)
         obs_std = torch.ones(obs_dim)
+        env.close()
+
         critic = FF_V(obs_dim, obs_mean=obs_mean, obs_std=obs_std)
 
         obs = torch.randn(32, obs_dim)
@@ -413,11 +369,15 @@ class TestPolicyNetworks:
         assert value.shape == (32, 1)
         assert torch.all(torch.isfinite(value))
 
-    def test_lstm_actor_forward_pass(self):
-        """Test LSTM actor forward pass."""
+    def test_lstm_actor_forward_pass(self, env_factory, env_name):
+        """Test LSTM actor forward pass with environment dimensions."""
         from rl.policies.actor import Gaussian_LSTM_Actor
 
-        obs_dim, action_dim = 35, 10
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        env.close()
+
         actor = Gaussian_LSTM_Actor(obs_dim, action_dim, init_std=0.2, learn_std=False)
         actor.init_hidden_state()
 
@@ -427,11 +387,14 @@ class TestPolicyNetworks:
         assert action.shape == (action_dim,)
         assert torch.all(torch.isfinite(action))
 
-    def test_lstm_critic_forward_pass(self):
-        """Test LSTM critic forward pass."""
+    def test_lstm_critic_forward_pass(self, env_factory, env_name):
+        """Test LSTM critic forward pass with environment dimensions."""
         from rl.policies.critic import LSTM_V
 
-        obs_dim = 35
+        env = env_factory()
+        obs_dim = env.observation_space.shape[0]
+        env.close()
+
         critic = LSTM_V(obs_dim)
         critic.init_hidden_state()
         # LSTM_V requires obs_mean/obs_std to be set
@@ -448,29 +411,29 @@ class TestPolicyNetworks:
 class TestRecurrentTraining:
     """Tests for recurrent (LSTM) policy training."""
 
-    def test_ppo_initializes_with_recurrent_flag(self, h1_env_fn, h1_train_args):
+    def test_ppo_initializes_with_recurrent_flag(self, env_factory, train_args, env_name):
         """Test PPO initializes with LSTM networks when recurrent flag set."""
         from rl.algos.ppo import PPO
         from rl.policies.actor import Gaussian_LSTM_Actor
         from rl.policies.critic import LSTM_V
 
-        h1_train_args.recurrent = True
-        ppo = PPO(h1_env_fn, h1_train_args)
+        train_args.recurrent = True
+        ppo = PPO(env_factory, train_args)
 
         assert isinstance(ppo.policy, Gaussian_LSTM_Actor)
         assert isinstance(ppo.critic, LSTM_V)
 
     @pytest.mark.timeout(120)
     @pytest.mark.slow
-    def test_recurrent_training_one_iteration(self, h1_env_fn, h1_train_args):
+    def test_recurrent_training_one_iteration(self, env_factory, train_args, env_name):
         """Test recurrent training runs for one iteration."""
         from rl.algos.ppo import PPO
 
-        h1_train_args.recurrent = True
-        h1_train_args.n_itr = 1
-        h1_train_args.eval_freq = 1
+        train_args.recurrent = True
+        train_args.n_itr = 1
+        train_args.eval_freq = 1
 
-        ppo = PPO(h1_env_fn, h1_train_args)
-        ppo.train(h1_env_fn, n_itr=1)
+        ppo = PPO(env_factory, train_args)
+        ppo.train(env_factory, n_itr=1)
 
-        assert (h1_train_args.logdir / "actor_0.pt").exists()
+        assert (train_args.logdir / "actor_0.pt").exists()

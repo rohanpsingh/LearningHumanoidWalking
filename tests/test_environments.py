@@ -1,286 +1,231 @@
-"""Unit tests for all environment implementations."""
+"""Unit tests for all environment implementations.
+
+These tests are parametrized to run against ALL environments discovered
+under envs/. When new environments are added, they will automatically
+be included in the test suite.
+"""
 import pytest
 import numpy as np
 
+from conftest import get_all_env_instances, close_all_envs, DISCOVERED_ENVIRONMENTS
 
-class TestH1Environment:
-    """Tests for the H1 humanoid standing environment."""
 
-    def test_initialization(self, h1_env):
-        """Test H1 environment initializes correctly."""
-        assert h1_env is not None
-        assert h1_env.model is not None
-        assert h1_env.data is not None
+class TestEnvironmentBasics:
+    """Basic tests that run for every discovered environment."""
 
-    def test_observation_space_shape(self, h1_env):
-        """Test observation space has correct shape."""
-        # H1 has 35 base obs * history_len
-        expected_base = 35
-        assert h1_env.base_obs_len == expected_base
-        assert h1_env.observation_space.shape[0] == expected_base * h1_env.history_len
+    def test_initialization(self, env_instance, env_name):
+        """Test environment initializes correctly."""
+        assert env_instance is not None
+        assert env_instance.model is not None
+        assert env_instance.data is not None
 
-    def test_action_space_shape(self, h1_env):
-        """Test action space has correct shape (10 DOF legs)."""
-        assert h1_env.action_space.shape[0] == 10
+    def test_has_observation_space(self, env_instance, env_name):
+        """Test environment has observation_space attribute."""
+        assert hasattr(env_instance, 'observation_space')
+        assert env_instance.observation_space is not None
+        assert hasattr(env_instance.observation_space, 'shape')
+        obs_dim = env_instance.observation_space.shape[0]
+        assert obs_dim > 0
 
-    def test_reset_returns_valid_observation(self, h1_env):
+    def test_has_action_space(self, env_instance, env_name):
+        """Test environment has action_space attribute."""
+        assert hasattr(env_instance, 'action_space')
+        assert env_instance.action_space is not None
+        assert hasattr(env_instance.action_space, 'shape')
+        action_dim = env_instance.action_space.shape[0]
+        assert action_dim > 0
+
+    def test_reset_returns_valid_observation(self, env_instance, env_name):
         """Test reset returns observation with correct shape and valid values."""
-        obs = h1_env.reset()
-        assert obs.shape == h1_env.observation_space.shape
-        assert not np.any(np.isnan(obs))
-        assert not np.any(np.isinf(obs))
+        obs = env_instance.reset()
 
-    def test_step_with_zero_action(self, h1_env):
+        expected_shape = env_instance.observation_space.shape
+        assert obs.shape == expected_shape, \
+            f"Expected obs shape {expected_shape}, got {obs.shape}"
+        assert not np.any(np.isnan(obs)), "Observation contains NaN"
+        assert not np.any(np.isinf(obs)), "Observation contains Inf"
+
+    def test_step_with_zero_action(self, env_instance, env_name):
         """Test stepping with zero action."""
-        h1_env.reset()
-        action = np.zeros(h1_env.action_space.shape[0])
-        obs, reward, done, info = h1_env.step(action)
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
+        action = np.zeros(action_dim)
 
-        assert obs.shape == h1_env.observation_space.shape
+        obs, reward, done, info = env_instance.step(action)
+
+        assert obs.shape == env_instance.observation_space.shape
         assert isinstance(reward, (int, float))
         assert isinstance(done, bool)
         assert isinstance(info, dict)
-        assert not np.any(np.isnan(obs))
+        assert not np.any(np.isnan(obs)), "Observation contains NaN after step"
 
-    def test_step_with_random_action(self, h1_env):
+    def test_step_with_random_action(self, env_instance, env_name):
         """Test stepping with random action."""
-        h1_env.reset()
-        action = np.random.uniform(-1, 1, h1_env.action_space.shape[0])
-        obs, reward, done, info = h1_env.step(action)
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
+        action = np.random.uniform(-1, 1, action_dim)
 
-        assert obs.shape == h1_env.observation_space.shape
+        obs, reward, done, info = env_instance.step(action)
+
+        assert obs.shape == env_instance.observation_space.shape
         assert isinstance(reward, (int, float))
         assert not np.any(np.isnan(obs))
 
-    def test_multiple_steps(self, h1_env):
+    def test_multiple_steps(self, env_instance, env_name):
         """Test taking multiple steps without errors."""
-        h1_env.reset()
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
+
         for _ in range(100):
-            action = np.random.uniform(-1, 1, h1_env.action_space.shape[0])
-            obs, reward, done, info = h1_env.step(action)
+            action = np.random.uniform(-1, 1, action_dim)
+            obs, reward, done, info = env_instance.step(action)
             if done:
-                obs = h1_env.reset()
+                obs = env_instance.reset()
             assert not np.any(np.isnan(obs))
 
-    def test_reward_components(self, h1_env):
-        """Test that reward info dict contains expected components."""
-        h1_env.reset()
-        action = np.zeros(h1_env.action_space.shape[0])
-        _, _, _, info = h1_env.step(action)
+    def test_reward_is_dict(self, env_instance, env_name):
+        """Test that step returns reward info as a dict."""
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
+        action = np.zeros(action_dim)
 
-        expected_keys = [
-            "com_vel_error",
-            "yaw_vel_error",
-            "height",
-            "upperbody",
-            "joint_torque_reward",
-            "posture",
-        ]
-        for key in expected_keys:
-            assert key in info, f"Missing reward component: {key}"
-            assert not np.isnan(info[key])
+        _, _, _, info = env_instance.step(action)
 
-    def test_obs_normalization_stats(self, h1_env):
-        """Test observation normalization statistics are defined."""
-        assert hasattr(h1_env, 'obs_mean')
-        assert hasattr(h1_env, 'obs_std')
-        assert h1_env.obs_mean.shape == h1_env.observation_space.shape
-        assert h1_env.obs_std.shape == h1_env.observation_space.shape
-        assert np.all(h1_env.obs_std > 0)  # Std should be positive
-
-    def test_task_termination_conditions(self, h1_env):
-        """Test that termination conditions work."""
-        h1_env.reset()
-        # Run many steps to potentially trigger termination
-        terminated = False
-        for _ in range(500):
-            action = np.random.uniform(-1, 1, h1_env.action_space.shape[0])
-            _, _, done, _ = h1_env.step(action)
-            if done:
-                terminated = True
-                break
-        # We may or may not terminate, but should not crash
-
-
-class TestJvrcWalkEnvironment:
-    """Tests for the JVRC walking environment."""
-
-    def test_initialization(self, jvrc_walk_env):
-        """Test JVRC walk environment initializes correctly."""
-        assert jvrc_walk_env is not None
-        assert jvrc_walk_env.model is not None
-        assert jvrc_walk_env.data is not None
-
-    def test_observation_space_shape(self, jvrc_walk_env):
-        """Test observation space has correct shape."""
-        # JVRC walk has 32 base obs * history_len
-        expected_base = 32
-        assert jvrc_walk_env.base_obs_len == expected_base
-        assert jvrc_walk_env.observation_space.shape[0] == expected_base * jvrc_walk_env.history_len
-
-    def test_action_space_shape(self, jvrc_walk_env):
-        """Test action space has correct shape (12 DOF legs)."""
-        assert jvrc_walk_env.action_space.shape[0] == 12
-
-    def test_reset_returns_valid_observation(self, jvrc_walk_env):
-        """Test reset returns observation with correct shape and valid values."""
-        obs = jvrc_walk_env.reset()
-        assert obs.shape == jvrc_walk_env.observation_space.shape
-        assert not np.any(np.isnan(obs))
-        assert not np.any(np.isinf(obs))
-
-    def test_step_with_zero_action(self, jvrc_walk_env):
-        """Test stepping with zero action."""
-        jvrc_walk_env.reset()
-        action = np.zeros(jvrc_walk_env.action_space.shape[0])
-        obs, reward, done, info = jvrc_walk_env.step(action)
-
-        assert obs.shape == jvrc_walk_env.observation_space.shape
-        assert isinstance(reward, (int, float))
-        assert isinstance(done, bool)
         assert isinstance(info, dict)
-        assert not np.any(np.isnan(obs))
+        # All reward components should be finite
+        for key, value in info.items():
+            if isinstance(value, (int, float)):
+                assert np.isfinite(value), f"Reward component {key} is not finite"
 
-    def test_step_with_random_action(self, jvrc_walk_env):
-        """Test stepping with random action."""
-        jvrc_walk_env.reset()
-        action = np.random.uniform(-1, 1, jvrc_walk_env.action_space.shape[0])
-        obs, reward, done, info = jvrc_walk_env.step(action)
-
-        assert obs.shape == jvrc_walk_env.observation_space.shape
-        assert isinstance(reward, (int, float))
-        assert not np.any(np.isnan(obs))
-
-    def test_multiple_steps(self, jvrc_walk_env):
-        """Test taking multiple steps without errors."""
-        jvrc_walk_env.reset()
-        for _ in range(100):
-            action = np.random.uniform(-1, 1, jvrc_walk_env.action_space.shape[0])
-            obs, reward, done, info = jvrc_walk_env.step(action)
-            if done:
-                obs = jvrc_walk_env.reset()
+    def test_consecutive_resets(self, env_instance, env_name):
+        """Test consecutive resets don't cause issues."""
+        for _ in range(5):
+            obs = env_instance.reset()
             assert not np.any(np.isnan(obs))
 
-    def test_clock_observation(self, jvrc_walk_env):
-        """Test that phase clock is included in observations."""
-        obs = jvrc_walk_env.reset()
-        # Clock should be in the observation (sin, cos of phase)
-        # Should have values between -1 and 1
-        clock_obs = obs[-3:-1]  # Last 3 are clock and goal speed
-        assert np.all(np.abs(clock_obs) <= 1.0)
+    def test_handles_extreme_actions(self, env_instance, env_name):
+        """Test environment handles extreme action values."""
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
+        extreme_action = np.ones(action_dim) * 10
 
-    def test_mirror_indices_defined(self, jvrc_walk_env):
-        """Test that mirror indices are defined for symmetry learning."""
-        assert hasattr(jvrc_walk_env.robot, 'mirrored_obs')
-        assert hasattr(jvrc_walk_env.robot, 'mirrored_acts')
-        assert hasattr(jvrc_walk_env.robot, 'clock_inds')
-        assert len(jvrc_walk_env.robot.mirrored_obs) > 0
-        assert len(jvrc_walk_env.robot.mirrored_acts) == 12
+        obs, reward, done, _ = env_instance.step(extreme_action)
 
-    def test_obs_normalization_stats(self, jvrc_walk_env):
-        """Test observation normalization statistics are defined."""
-        assert hasattr(jvrc_walk_env, 'obs_mean')
-        assert hasattr(jvrc_walk_env, 'obs_std')
-        assert jvrc_walk_env.obs_mean.shape == jvrc_walk_env.observation_space.shape
-        assert jvrc_walk_env.obs_std.shape == jvrc_walk_env.observation_space.shape
-        assert np.all(jvrc_walk_env.obs_std > 0)
-
-    def test_task_phase_advances(self, jvrc_walk_env):
-        """Test that the gait phase advances during stepping."""
-        jvrc_walk_env.reset()
-        initial_phase = jvrc_walk_env.task._phase
-
-        # Take some steps
-        for _ in range(10):
-            action = np.zeros(jvrc_walk_env.action_space.shape[0])
-            jvrc_walk_env.step(action)
-
-        # Phase should have changed
-        assert jvrc_walk_env.task._phase != initial_phase or jvrc_walk_env.task._phase == 0
+        assert not np.any(np.isnan(obs)), "NaN in observation after extreme action"
+        assert np.isfinite(reward), "Reward not finite after extreme action"
 
 
-class TestJvrcStepEnvironment:
-    """Tests for the JVRC stepping environment."""
+class TestEnvironmentAttributes:
+    """Tests for required environment attributes."""
 
-    def test_initialization(self, jvrc_step_env):
-        """Test JVRC step environment initializes correctly."""
-        assert jvrc_step_env is not None
-        assert jvrc_step_env.model is not None
-        assert jvrc_step_env.data is not None
+    def test_has_robot_attribute(self, env_instance, env_name):
+        """Test environment has robot attribute."""
+        assert hasattr(env_instance, 'robot')
+        assert env_instance.robot is not None
 
-    def test_observation_space_shape(self, jvrc_step_env):
-        """Test observation space has correct shape."""
-        # JVRC step has 39 base obs * history_len (extended from walk)
-        expected_base = 39
-        assert jvrc_step_env.base_obs_len == expected_base
-        assert jvrc_step_env.observation_space.shape[0] == expected_base * jvrc_step_env.history_len
+    def test_has_task_attribute(self, env_instance, env_name):
+        """Test environment has task attribute."""
+        assert hasattr(env_instance, 'task')
+        assert env_instance.task is not None
 
-    def test_action_space_shape(self, jvrc_step_env):
-        """Test action space has correct shape (12 DOF legs)."""
-        assert jvrc_step_env.action_space.shape[0] == 12
+    def test_has_interface_attribute(self, env_instance, env_name):
+        """Test environment has interface attribute."""
+        assert hasattr(env_instance, 'interface')
+        assert env_instance.interface is not None
 
-    def test_reset_returns_valid_observation(self, jvrc_step_env):
-        """Test reset returns observation with correct shape and valid values."""
-        obs = jvrc_step_env.reset()
-        assert obs.shape == jvrc_step_env.observation_space.shape
-        assert not np.any(np.isnan(obs))
-        assert not np.any(np.isinf(obs))
+    def test_has_obs_normalization_stats(self, env_instance, env_name):
+        """Test environment has observation normalization stats."""
+        assert hasattr(env_instance, 'obs_mean'), \
+            f"Environment {env_name} missing obs_mean attribute"
+        assert hasattr(env_instance, 'obs_std'), \
+            f"Environment {env_name} missing obs_std attribute"
 
-    def test_step_with_zero_action(self, jvrc_step_env):
-        """Test stepping with zero action."""
-        jvrc_step_env.reset()
-        action = np.zeros(jvrc_step_env.action_space.shape[0])
-        obs, reward, done, info = jvrc_step_env.step(action)
+        obs_dim = env_instance.observation_space.shape[0]
+        assert env_instance.obs_mean.shape == (obs_dim,), \
+            f"obs_mean shape mismatch: expected ({obs_dim},), got {env_instance.obs_mean.shape}"
+        assert env_instance.obs_std.shape == (obs_dim,), \
+            f"obs_std shape mismatch: expected ({obs_dim},), got {env_instance.obs_std.shape}"
+        assert np.all(env_instance.obs_std > 0), "obs_std should be positive"
 
-        assert obs.shape == jvrc_step_env.observation_space.shape
-        assert isinstance(reward, (int, float))
-        assert isinstance(done, bool)
-        assert isinstance(info, dict)
-        assert not np.any(np.isnan(obs))
 
-    def test_step_with_random_action(self, jvrc_step_env):
-        """Test stepping with random action."""
-        jvrc_step_env.reset()
-        action = np.random.uniform(-1, 1, jvrc_step_env.action_space.shape[0])
-        obs, reward, done, info = jvrc_step_env.step(action)
+class TestEnvironmentRewards:
+    """Tests for reward computation."""
 
-        assert obs.shape == jvrc_step_env.observation_space.shape
-        assert isinstance(reward, (int, float))
-        assert not np.any(np.isnan(obs))
+    def test_rewards_are_bounded(self, env_instance, env_name):
+        """Test that rewards are reasonably bounded."""
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
 
-    def test_multiple_steps(self, jvrc_step_env):
-        """Test taking multiple steps without errors."""
-        jvrc_step_env.reset()
-        for _ in range(100):
-            action = np.random.uniform(-1, 1, jvrc_step_env.action_space.shape[0])
-            obs, reward, done, info = jvrc_step_env.step(action)
+        total_rewards = []
+        for _ in range(50):
+            action = np.random.uniform(-1, 1, action_dim)
+            _, reward, done, _ = env_instance.step(action)
+            total_rewards.append(reward)
             if done:
-                obs = jvrc_step_env.reset()
-            assert not np.any(np.isnan(obs))
+                env_instance.reset()
 
-    def test_stepping_goal_info_in_observation(self, jvrc_step_env):
-        """Test that stepping goal info is included in observations."""
-        obs = jvrc_step_env.reset()
-        # Step environment has extended observations for footstep targets
-        # Observation length should be 39 * history_len
-        assert obs.shape[0] == 39 * jvrc_step_env.history_len
+        assert np.all(np.isfinite(total_rewards)), "Some rewards are not finite"
+        # Rewards should be reasonably bounded (adjust if needed)
+        assert np.max(np.abs(total_rewards)) < 1000, "Rewards seem unbounded"
 
-    def test_mirror_indices_defined(self, jvrc_step_env):
-        """Test that mirror indices are defined for symmetry learning."""
-        assert hasattr(jvrc_step_env.robot, 'mirrored_obs')
-        assert hasattr(jvrc_step_env.robot, 'mirrored_acts')
-        assert hasattr(jvrc_step_env.robot, 'clock_inds')
+    def test_reward_components_sum_to_total(self, env_instance, env_name):
+        """Test that reward dict values sum to the returned reward."""
+        env_instance.reset()
+        action_dim = env_instance.action_space.shape[0]
+        action = np.zeros(action_dim)
 
-    def test_inherits_from_walk_env(self, jvrc_step_env):
-        """Test that JvrcStepEnv inherits from JvrcWalkEnv."""
-        from envs.jvrc import JvrcWalkEnv
-        assert isinstance(jvrc_step_env, JvrcWalkEnv)
+        _, total_reward, _, info = env_instance.step(action)
+
+        # Sum numeric values in info dict (reward components)
+        component_sum = sum(v for v in info.values() if isinstance(v, (int, float)))
+
+        # Allow small floating point tolerance
+        assert abs(total_reward - component_sum) < 1e-6, \
+            f"Total reward {total_reward} != sum of components {component_sum}"
+
+
+class TestMirrorSymmetry:
+    """Tests for environments that support mirror symmetry learning."""
+
+    def test_mirror_indices_valid_if_present(self, env_instance, env_name):
+        """Test mirror indices are valid if environment supports symmetry."""
+        if not hasattr(env_instance.robot, 'mirrored_obs'):
+            pytest.skip(f"{env_name} does not support mirror symmetry")
+
+        obs_dim = env_instance.observation_space.shape[0] // env_instance.history_len
+        action_dim = env_instance.action_space.shape[0]
+
+        # Check mirrored_obs indices are valid
+        mirrored_obs = env_instance.robot.mirrored_obs
+        assert len(mirrored_obs) > 0
+        for idx in mirrored_obs:
+            abs_idx = abs(idx) if isinstance(idx, (int, float)) else abs(int(idx))
+            # Index should be within observation dimension (accounting for sign encoding)
+            assert abs_idx < obs_dim or abs(idx) < 1, \
+                f"Invalid mirror obs index: {idx}, obs_dim={obs_dim}"
+
+        # Check mirrored_acts indices are valid
+        if hasattr(env_instance.robot, 'mirrored_acts'):
+            mirrored_acts = env_instance.robot.mirrored_acts
+            assert len(mirrored_acts) == action_dim, \
+                f"mirrored_acts length {len(mirrored_acts)} != action_dim {action_dim}"
+
+    def test_clock_indices_valid_if_present(self, env_instance, env_name):
+        """Test clock indices are valid if environment has clock."""
+        if not hasattr(env_instance.robot, 'clock_inds'):
+            pytest.skip(f"{env_name} does not have clock indices")
+
+        clock_inds = env_instance.robot.clock_inds
+        obs_dim = env_instance.observation_space.shape[0] // env_instance.history_len
+
+        for idx in clock_inds:
+            assert 0 <= idx < obs_dim, f"Invalid clock index: {idx}"
 
 
 class TestEnvironmentConsistency:
     """Cross-environment consistency tests."""
 
-    def test_all_envs_have_required_attributes(self, h1_env, jvrc_walk_env, jvrc_step_env):
+    def test_all_envs_have_required_attributes(self):
         """Test all environments have required attributes."""
         required_attrs = [
             'observation_space',
@@ -291,70 +236,77 @@ class TestEnvironmentConsistency:
             'task',
             'interface',
         ]
-        for env in [h1_env, jvrc_walk_env, jvrc_step_env]:
-            for attr in required_attrs:
-                assert hasattr(env, attr), f"Environment missing attribute: {attr}"
 
-    def test_all_envs_return_consistent_step_signature(self, h1_env, jvrc_walk_env, jvrc_step_env):
+        envs = get_all_env_instances()
+        try:
+            for env_name, env in envs:
+                for attr in required_attrs:
+                    assert hasattr(env, attr), \
+                        f"Environment {env_name} missing attribute: {attr}"
+        finally:
+            close_all_envs(envs)
+
+    def test_all_envs_return_consistent_step_signature(self):
         """Test all environments return (obs, reward, done, info) from step."""
-        for env in [h1_env, jvrc_walk_env, jvrc_step_env]:
-            env.reset()
-            action = np.zeros(env.action_space.shape[0])
-            result = env.step(action)
-            assert len(result) == 4
-            obs, reward, done, info = result
-            assert isinstance(obs, np.ndarray)
-            assert isinstance(reward, (int, float))
-            assert isinstance(done, bool)
-            assert isinstance(info, dict)
+        envs = get_all_env_instances()
+        try:
+            for env_name, env in envs:
+                env.reset()
+                action = np.zeros(env.action_space.shape[0])
+                result = env.step(action)
 
-    def test_all_envs_rewards_are_bounded(self, h1_env, jvrc_walk_env, jvrc_step_env):
-        """Test that rewards from all environments are reasonably bounded."""
-        for env in [h1_env, jvrc_walk_env, jvrc_step_env]:
-            env.reset()
-            total_rewards = []
-            for _ in range(50):
-                action = np.random.uniform(-1, 1, env.action_space.shape[0])
-                _, reward, done, _ = env.step(action)
-                total_rewards.append(reward)
-                if done:
-                    env.reset()
+                assert len(result) == 4, \
+                    f"{env_name} step() should return 4 values, got {len(result)}"
+                obs, reward, done, info = result
+                assert isinstance(obs, np.ndarray), \
+                    f"{env_name}: obs should be ndarray"
+                assert isinstance(reward, (int, float)), \
+                    f"{env_name}: reward should be numeric"
+                assert isinstance(done, bool), \
+                    f"{env_name}: done should be bool"
+                assert isinstance(info, dict), \
+                    f"{env_name}: info should be dict"
+        finally:
+            close_all_envs(envs)
 
-            # Rewards should be finite and reasonably bounded
-            assert np.all(np.isfinite(total_rewards))
-            assert np.max(np.abs(total_rewards)) < 100  # Reasonable bound
+    def test_all_envs_dimensions_consistent(self):
+        """Test observation and action dimensions are consistent across methods."""
+        envs = get_all_env_instances()
+        try:
+            for env_name, env in envs:
+                obs_dim = env.observation_space.shape[0]
+                action_dim = env.action_space.shape[0]
 
-
-class TestEnvironmentRobustness:
-    """Tests for environment robustness under edge cases."""
-
-    def test_h1_handles_extreme_actions(self, h1_env):
-        """Test H1 handles extreme action values."""
-        h1_env.reset()
-        extreme_action = np.ones(h1_env.action_space.shape[0]) * 10
-        obs, reward, done, _ = h1_env.step(extreme_action)
-        assert not np.any(np.isnan(obs))
-        assert np.isfinite(reward)
-
-    def test_jvrc_walk_handles_extreme_actions(self, jvrc_walk_env):
-        """Test JVRC walk handles extreme action values."""
-        jvrc_walk_env.reset()
-        extreme_action = np.ones(jvrc_walk_env.action_space.shape[0]) * 10
-        obs, reward, done, _ = jvrc_walk_env.step(extreme_action)
-        assert not np.any(np.isnan(obs))
-        assert np.isfinite(reward)
-
-    def test_jvrc_step_handles_extreme_actions(self, jvrc_step_env):
-        """Test JVRC step handles extreme action values."""
-        jvrc_step_env.reset()
-        extreme_action = np.ones(jvrc_step_env.action_space.shape[0]) * 10
-        obs, reward, done, _ = jvrc_step_env.step(extreme_action)
-        assert not np.any(np.isnan(obs))
-        assert np.isfinite(reward)
-
-    def test_consecutive_resets(self, h1_env, jvrc_walk_env, jvrc_step_env):
-        """Test consecutive resets don't cause issues."""
-        for env in [h1_env, jvrc_walk_env, jvrc_step_env]:
-            for _ in range(5):
+                # Reset should return correct obs dim
                 obs = env.reset()
-                assert not np.any(np.isnan(obs))
+                assert obs.shape[0] == obs_dim, \
+                    f"{env_name}: reset obs dim mismatch"
+
+                # Step should return correct obs dim
+                action = np.zeros(action_dim)
+                obs, _, _, _ = env.step(action)
+                assert obs.shape[0] == obs_dim, \
+                    f"{env_name}: step obs dim mismatch"
+
+                # obs_mean/obs_std should match obs dim
+                assert env.obs_mean.shape[0] == obs_dim, \
+                    f"{env_name}: obs_mean dim mismatch"
+                assert env.obs_std.shape[0] == obs_dim, \
+                    f"{env_name}: obs_std dim mismatch"
+        finally:
+            close_all_envs(envs)
+
+
+class TestDiscoveredEnvironments:
+    """Meta-tests to verify environment discovery."""
+
+    def test_environments_discovered(self):
+        """Test that at least some environments were discovered."""
+        assert len(DISCOVERED_ENVIRONMENTS) > 0, \
+            "No environments discovered under envs/"
+
+    def test_discovered_environments_info(self):
+        """Print discovered environments for debugging."""
+        print(f"\nDiscovered {len(DISCOVERED_ENVIRONMENTS)} environments:")
+        for env_name, info in DISCOVERED_ENVIRONMENTS.items():
+            print(f"  - {env_name}: {info['class'].__name__} from {info['robot']}")

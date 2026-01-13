@@ -34,6 +34,7 @@ dev = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+addopts = "-p no:launch_testing -p no:launch_ros"
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
