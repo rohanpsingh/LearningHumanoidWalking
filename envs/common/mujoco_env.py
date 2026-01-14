@@ -18,8 +18,7 @@ class MujocoEnv():
         if not os.path.exists(fullpath):
             raise IOError("File %s does not exist" % fullpath)
 
-        self.spec = mujoco.MjSpec()
-        self.spec.from_file(fullpath)
+        self.spec = mujoco.MjSpec.from_file(fullpath)
         self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
         self.viewer = None
@@ -150,3 +149,62 @@ class MujocoEnv():
         if self.viewer is not None:
             self.viewer.close()
             self.viewer = None
+
+    # Contact diagnostics for MuJoCo 3.4.0 upgrade verification
+    def check_contact_truncation(self):
+        """Check if contacts are being truncated due to nconmax limit.
+
+        Returns:
+            tuple: (is_truncated, ncon, nconmax)
+        """
+        ncon = self.data.ncon
+        nconmax = self.model.nconmax
+        # In MuJoCo 3.x, -1 means auto-sized (no explicit limit)
+        is_truncated = nconmax > 0 and ncon >= nconmax
+        return (is_truncated, ncon, nconmax)
+
+    def print_contact_diagnostics(self):
+        """Print contact diagnostics for debugging collision issues."""
+        is_truncated, ncon, nconmax = self.check_contact_truncation()
+        print(f"Contacts: {ncon}/{nconmax}" + (" [TRUNCATED!]" if is_truncated else ""))
+        print(f"Constraints (njmax): {self.data.nefc}/{self.model.njmax}")
+
+        for i in range(ncon):
+            con = self.data.contact[i]
+            geom1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, con.geom1) or f"geom{con.geom1}"
+            geom2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, con.geom2) or f"geom{con.geom2}"
+            print(f"  Contact {i}: {geom1_name} <-> {geom2_name}, dist={con.dist:.6f}")
+
+    def get_contact_summary(self):
+        """Get summary of current contacts for verification.
+
+        Returns:
+            dict: Contact statistics and details including forces
+        """
+        is_truncated, ncon, nconmax = self.check_contact_truncation()
+        contacts = []
+        for i in range(ncon):
+            con = self.data.contact[i]
+            geom1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, con.geom1)
+            geom2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, con.geom2)
+
+            # Get contact force
+            c_array = np.zeros(6, dtype=np.float64)
+            mujoco.mj_contactForce(self.model, self.data, i, c_array)
+            force = np.linalg.norm(c_array)
+
+            contacts.append({
+                'geom1': geom1_name or f"geom{con.geom1}",
+                'geom2': geom2_name or f"geom{con.geom2}",
+                'dist': con.dist,
+                'force': force,
+                'pos': con.pos.copy()
+            })
+        return {
+            'ncon': ncon,
+            'nconmax': nconmax,
+            'truncated': is_truncated,
+            'nefc': self.data.nefc,
+            'njmax': self.model.njmax,
+            'contacts': contacts
+        }
