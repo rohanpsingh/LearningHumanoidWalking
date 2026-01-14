@@ -232,7 +232,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -590,7 +590,6 @@ dependencies = [
     { name = "imageio", extra = ["ffmpeg"] },
     { name = "intel-openmp" },
     { name = "mujoco" },
-    { name = "mujoco-python-viewer" },
     { name = "ray" },
     { name = "tensorboard" },
     { name = "torch" },
@@ -609,7 +608,6 @@ requires-dist = [
     { name = "imageio", extras = ["ffmpeg"], specifier = ">=2.37.0" },
     { name = "intel-openmp", specifier = ">=2025.2.1" },
     { name = "mujoco", specifier = "==3.2.2" },
-    { name = "mujoco-python-viewer", specifier = ">=0.1.4" },
     { name = "ray", specifier = "==2.40.0" },
     { name = "tensorboard", specifier = ">=2.20.0" },
     { name = "torch", specifier = "==2.5.1" },
@@ -926,21 +924,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/b3/a8b7f3efde3083d583067317ed1c7dec15f49842458a3f66498df90033af/mujoco-3.2.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:773634baaebb13ea2f49ccec451756c2ffbb58d6d4e1faa41c7dd79b215ef12b", size = 5829974, upload-time = "2024-08-08T16:28:13.556Z" },
     { url = "https://files.pythonhosted.org/packages/5d/72/4194951a281c21cdf2ebfff44f57dcaff95e4c15b1a6019d5738c698fb73/mujoco-3.2.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a744f11c3a3e2b823cf4200d5334a743566daa29ea5a4a47354ded6e2ddc2aaf", size = 6066237, upload-time = "2024-08-08T16:28:16.186Z" },
     { url = "https://files.pythonhosted.org/packages/c3/2e/3f0b05abdb31e89b2fa7f5a601dd096fc01a0ccda933cb38f09eccb0b50d/mujoco-3.2.2-cp312-cp312-win_amd64.whl", hash = "sha256:e69e454f0daef591d72b42c02aca253df4ad4e9e494468d4b12e54a166f9207d", size = 4417312, upload-time = "2024-08-08T16:28:19.028Z" },
-]
-
-[[package]]
-name = "mujoco-python-viewer"
-version = "0.1.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "glfw" },
-    { name = "imageio" },
-    { name = "mujoco" },
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/40/be/f27036bdd33156156f3e15975db4e5db8c57b115044d55b7bfaf81a1a4f9/mujoco-python-viewer-0.1.4.tar.gz", hash = "sha256:0602ffd47e14e84b90196e09f45bc353a6339dee069fdd70ebb0253913eb849d", size = 10185, upload-time = "2023-11-14T07:02:03.88Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/73/1b87b50091af38d86ada50d8fe3f294335f2d730aa1d124f4c714217fe60/mujoco_python_viewer-0.1.4-py3-none-any.whl", hash = "sha256:c1aa715a00420cb08ee9a2f696491f477952b336432f0b4b754b00d06e9b6b1e", size = 10271, upload-time = "2023-11-14T07:02:02.504Z" },
 ]
 
 [[package]]
@@ -2022,7 +2005,7 @@ name = "triton"
 version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock" },
+    { name = "filelock", marker = "python_full_version < '3.13'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/98/29/69aa56dc0b2eb2602b553881e34243475ea2afd9699be042316842788ff5/triton-3.1.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6b0dd10a925263abbe9fa37dcde67a5e9b2383fc269fdf59f5657cac38c5d1d8", size = 209460013, upload-time = "2024-10-14T16:05:32.106Z" },

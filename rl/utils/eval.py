@@ -3,10 +3,10 @@ import time
 from pathlib import Path
 
 import mujoco
-import mujoco.viewer
 
 import imageio
 from datetime import datetime
+
 
 class EvaluateEnv:
     def __init__(self, env, policy, args):
@@ -29,47 +29,47 @@ class EvaluateEnv:
 
     @torch.no_grad()
     def run(self):
-
         height = 480
         width = 640
         renderer = mujoco.Renderer(self.env.model, height, width)
-        viewer = mujoco.viewer.launch_passive(self.env.model, self.env.data)
         frames = []
 
-        # Make a camera.
-        cam = viewer.cam
-        mujoco.mjv_defaultCamera(cam)
-        cam.elevation = -20
-        cam.distance = 4
+        # Initialize viewer via env.render()
+        observation = self.env.reset()
+        self.env.render()
+        viewer = self.env.viewer
+
+        # Configure camera
+        mujoco.mjv_defaultCamera(viewer.cam)
+        viewer.cam.elevation = -20
+        viewer.cam.distance = 4
 
         reset_counter = 0
-        observation = self.env.reset()
-        while self.env.data.time < self.ep_len:
-
+        while viewer.is_running() and self.env.data.time < self.ep_len:
             step_start = time.time()
 
             # forward pass and step
             raw = self.policy.forward(torch.tensor(observation, dtype=torch.float32), deterministic=True).detach().numpy()
-            observation, reward, done, _ = self.env.step(raw.copy())
+            observation, _, done, _ = self.env.step(raw.copy())
 
-            # render scene
-            cam.lookat = self.env.data.body(1).xpos.copy()
-            renderer.update_scene(self.env.data, cam)
-            pixels = renderer.render()
-            frames.append(pixels)
+            # render scene for video recording
+            viewer.cam.lookat = self.env.data.body(1).xpos.copy()
+            renderer.update_scene(self.env.data, viewer.cam)
+            if not self.env.viewer_is_paused():
+                frames.append(renderer.render())
 
-            viewer.sync()
+            # render viewer (handles pause internally)
+            self.env.render()
 
             if done and reset_counter < 3:
                 observation = self.env.reset()
                 reset_counter += 1
 
             time_until_next_step = max(
-                0, self.env.frame_skip*self.env.model.opt.timestep - (time.time() - step_start))
+                0, self.env.frame_skip * self.env.model.opt.timestep - (time.time() - step_start))
             time.sleep(time_until_next_step)
 
         for frame in frames:
             self.writer.append_data(frame)
         self.writer.close()
         self.env.close()
-        viewer.close()
