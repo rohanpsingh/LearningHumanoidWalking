@@ -2,7 +2,7 @@ import contextlib
 import os
 import numpy as np
 import mujoco
-import mujoco_viewer
+import mujoco.viewer
 
 DEFAULT_SIZE = 500
 
@@ -23,6 +23,7 @@ class MujocoEnv():
         self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
         self.viewer = None
+        self._viewer_paused = False
 
         # set frame skip and sim dt
         self.frame_skip = (control_dt/sim_dt)
@@ -41,22 +42,28 @@ class MujocoEnv():
         """
         raise NotImplementedError
 
+    def _key_callback(self, keycode):
+        """Handle keyboard events from the viewer."""
+        # Space key (ASCII/GLFW code 32)
+        if keycode == 32:
+            self._viewer_paused = not self._viewer_paused
+
     def viewer_setup(self):
         """
         This method is called when the viewer is initialized.
         Optionally implement this method, if you need to tinker with camera position
         and so forth.
         """
-        self.viewer.cam.trackbodyid = 1
-        self.viewer.cam.distance = self.model.stat.extent * 1.5
-        self.viewer.cam.lookat[2] = 1.5
-        self.viewer.cam.lookat[0] = 2.0
-        self.viewer.cam.elevation = -20
-        self.viewer.vopt.geomgroup[2] = 0
-        self.viewer._render_every_frame = True
+        with self.viewer.lock():
+            self.viewer.cam.trackbodyid = 1
+            self.viewer.cam.distance = self.model.stat.extent * 1.5
+            self.viewer.cam.lookat[2] = 1.5
+            self.viewer.cam.lookat[0] = 2.0
+            self.viewer.cam.elevation = -20
+            self.viewer.opt.geomgroup[2] = 0
 
     def viewer_is_paused(self):
-        return self.viewer._paused
+        return self._viewer_paused
 
     # -----------------------------
     # (some methods are taken directly from dm_control)
@@ -124,20 +131,20 @@ class MujocoEnv():
 
     def render(self):
         if self.viewer is None:
-            self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
+            self.viewer = mujoco.viewer.launch_passive(
+                self.model, self.data, key_callback=self._key_callback
+            )
             self.viewer_setup()
-        self.viewer.render()
+        # Block while paused, but keep viewer responsive
+        while self._viewer_paused and self.viewer.is_running():
+            self.viewer.sync()
+        self.viewer.sync()
 
     def uploadGPU(self, hfieldid=None, meshid=None, texid=None):
-        # hfield
-        if hfieldid is not None:
-            mujoco.mjr_uploadHField(self.model, self.viewer.ctx, hfieldid)
-        # mesh
-        if meshid is not None:
-            mujoco.mjr_uploadMesh(self.model, self.viewer.ctx, meshid)
-        # texture
-        if texid is not None:
-            mujoco.mjr_uploadTexture(self.model, self.viewer.ctx, texid)
+        raise NotImplementedError(
+            "uploadGPU is not supported with mujoco.viewer.launch_passive. "
+            "GPU uploads happen automatically when modifying model data."
+        )
 
     def close(self):
         if self.viewer is not None:

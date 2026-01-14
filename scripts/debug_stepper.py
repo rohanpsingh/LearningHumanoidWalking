@@ -8,6 +8,60 @@ import numpy as np
 import transforms3d as tf3
 from run_experiment import import_env
 
+
+class MarkerDrawer:
+    """Helper class to draw markers using mujoco.viewer's user_scn."""
+
+    def __init__(self, viewer):
+        self.viewer = viewer
+        self.geom_idx = 0
+
+    def reset(self):
+        """Reset the geometry counter before drawing a new frame."""
+        self.geom_idx = 0
+
+    def finalize(self):
+        """Set the final geometry count after all markers are added."""
+        self.viewer.user_scn.ngeom = self.geom_idx
+
+    def add_marker(self, pos, size, rgba, type, mat=None, label=""):
+        """Add a marker geometry to the viewer scene.
+
+        Args:
+            pos: 3D position [x, y, z]
+            size: Size array (interpretation depends on geometry type)
+            rgba: Color [r, g, b, a]
+            type: mujoco.mjtGeom type (e.g., mjGEOM_SPHERE, mjGEOM_ARROW)
+            mat: 3x3 rotation matrix (default: identity)
+            label: Unused (kept for API compatibility)
+        """
+        if self.geom_idx >= self.viewer.user_scn.maxgeom:
+            return  # Can't add more geometries
+
+        if mat is None:
+            mat = np.eye(3)
+
+        # Convert size format for different geometry types
+        if type == mujoco.mjtGeom.mjGEOM_SPHERE:
+            # For sphere, size[0] is radius
+            geom_size = [size[0], 0, 0]
+        elif type == mujoco.mjtGeom.mjGEOM_ARROW:
+            # For arrow: [shaft_radius, head_radius, shaft_length]
+            geom_size = [size[0], size[1], size[2]]
+        else:
+            geom_size = list(size)[:3] if len(size) >= 3 else list(size) + [0] * (3 - len(size))
+
+        mujoco.mjv_initGeom(
+            self.viewer.user_scn.geoms[self.geom_idx],
+            type=type,
+            size=geom_size,
+            pos=np.array(pos, dtype=np.float64),
+            mat=np.array(mat, dtype=np.float64).flatten(),
+            rgba=np.array(rgba, dtype=np.float32)
+        )
+        self.geom_idx += 1
+
+
 def print_reward(ep_rewards):
     mean_rewards = {k:[] for k in ep_rewards[-1].keys()}
     print('*********************************')
@@ -19,7 +73,7 @@ def print_reward(ep_rewards):
     print('*********************************')
     print("mean per step reward: ", sum(mean_rewards.values()))
 
-def draw_targets(task, viewer):
+def draw_targets(task, marker_drawer):
     # draw step sequence
     arrow_size = [0.02, 0.02, 0.5]
     sphere = mujoco.mjtGeom.mjGEOM_SPHERE
@@ -29,23 +83,23 @@ def draw_targets(task, viewer):
             step_pos = [step[0], step[1], step[2]]
             step_theta = step[3]
             if step_pos not in [task.sequence[task.t1][0:3].tolist(), task.sequence[task.t2][0:3].tolist()]:
-                viewer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="")
-                viewer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
+                marker_drawer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="")
+                marker_drawer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
 
         target_radius = task.target_radius
         step_pos = task.sequence[task.t1][0:3].tolist()
         step_theta = task.sequence[task.t1][3]
-        viewer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([1, 0, 0, 1]), type=sphere, label="t1")
-        viewer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([1, 0, 0, 1]), type=arrow, label="")
-        viewer.add_marker(pos=step_pos, size=np.ones(3)*target_radius, rgba=np.array([1, 0, 0, 0.1]), type=sphere, label="")
+        marker_drawer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([1, 0, 0, 1]), type=sphere, label="t1")
+        marker_drawer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([1, 0, 0, 1]), type=arrow, label="")
+        marker_drawer.add_marker(pos=step_pos, size=np.ones(3)*target_radius, rgba=np.array([1, 0, 0, 0.1]), type=sphere, label="")
         step_pos = task.sequence[task.t2][0:3].tolist()
         step_theta = task.sequence[task.t2][3]
-        viewer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 0, 1, 1]), type=sphere, label="t2")
-        viewer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([0, 0, 1, 1]), type=arrow, label="")
-        viewer.add_marker(pos=step_pos, size=np.ones(3)*target_radius, rgba=np.array([0, 0, 1, 0.1]), type=sphere, label="")
+        marker_drawer.add_marker(pos=step_pos, size=np.ones(3)*0.05, rgba=np.array([0, 0, 1, 1]), type=sphere, label="t2")
+        marker_drawer.add_marker(pos=step_pos, mat=tf3.euler.euler2mat(0, np.pi/2, step_theta), size=arrow_size, rgba=np.array([0, 0, 1, 1]), type=arrow, label="")
+        marker_drawer.add_marker(pos=step_pos, size=np.ones(3)*target_radius, rgba=np.array([0, 0, 1, 0.1]), type=sphere, label="")
     return
 
-def draw_stuff(task, viewer):
+def draw_stuff(task, marker_drawer):
     arrow_size = [0.02, 0.02, 0.5]
     sphere = mujoco.mjtGeom.mjGEOM_SPHERE
     arrow = mujoco.mjtGeom.mjGEOM_ARROW
@@ -54,24 +108,24 @@ def draw_stuff(task, viewer):
     goalx = task._goal_steps_x
     goaly = task._goal_steps_y
     goaltheta = task._goal_steps_theta
-    viewer.add_marker(pos=[goalx[0], goaly[0], 0], size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="G1")
-    viewer.add_marker(pos=[goalx[0], goaly[0], 0], mat=tf3.euler.euler2mat(0, np.pi/2, goaltheta[0]), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
-    viewer.add_marker(pos=[goalx[1], goaly[1], 0], size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="G2")
-    viewer.add_marker(pos=[goalx[1], goaly[1], 0], mat=tf3.euler.euler2mat(0, np.pi/2, goaltheta[1]), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
+    marker_drawer.add_marker(pos=[goalx[0], goaly[0], 0], size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="G1")
+    marker_drawer.add_marker(pos=[goalx[0], goaly[0], 0], mat=tf3.euler.euler2mat(0, np.pi/2, goaltheta[0]), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
+    marker_drawer.add_marker(pos=[goalx[1], goaly[1], 0], size=np.ones(3)*0.05, rgba=np.array([0, 1, 1, 1]), type=sphere, label="G2")
+    marker_drawer.add_marker(pos=[goalx[1], goaly[1], 0], mat=tf3.euler.euler2mat(0, np.pi/2, goaltheta[1]), size=arrow_size, rgba=np.array([0, 1, 1, 1]), type=arrow, label="")
 
     # draw feet pose
     lfoot_orient = (tf3.quaternions.quat2mat(task.l_foot_quat)).dot(tf3.euler.euler2mat(0, np.pi/2, 0))
     rfoot_orient = (tf3.quaternions.quat2mat(task.r_foot_quat)).dot(tf3.euler.euler2mat(0, np.pi/2, 0))
-    viewer.add_marker(pos=task.l_foot_pos, size=np.ones(3)*0.05, rgba=[0.5, 0.5, 0.5, 1], type=sphere, label="")
-    viewer.add_marker(pos=task.l_foot_pos, mat=lfoot_orient, size=arrow_size, rgba=[0.5, 0.5, 0.5, 1], type=arrow, label="")
-    viewer.add_marker(pos=task.r_foot_pos, size=np.ones(3)*0.05, rgba=[0.5, 0.5, 0.5, 1], type=sphere, label="")
-    viewer.add_marker(pos=task.r_foot_pos, mat=rfoot_orient, size=arrow_size, rgba=[0.5, 0.5, 0.5, 1], type=arrow, label="")
+    marker_drawer.add_marker(pos=task.l_foot_pos, size=np.ones(3)*0.05, rgba=[0.5, 0.5, 0.5, 1], type=sphere, label="")
+    marker_drawer.add_marker(pos=task.l_foot_pos, mat=lfoot_orient, size=arrow_size, rgba=[0.5, 0.5, 0.5, 1], type=arrow, label="")
+    marker_drawer.add_marker(pos=task.r_foot_pos, size=np.ones(3)*0.05, rgba=[0.5, 0.5, 0.5, 1], type=sphere, label="")
+    marker_drawer.add_marker(pos=task.r_foot_pos, mat=rfoot_orient, size=arrow_size, rgba=[0.5, 0.5, 0.5, 1], type=arrow, label="")
 
     # draw origin
-    viewer.add_marker(pos=[0, 0, 0], size=np.ones(3)*0.05, rgba=np.array([1, 1, 1, 1]), type=sphere, label="")
-    viewer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(0, 0, 0), size=[0.01, 0.01, 2], rgba=np.array([0, 0, 1, 0.2]), type=arrow, label="")
-    viewer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(0, np.pi/2, 0), size=[0.01, 0.01, 2], rgba=np.array([1, 0, 0, 0.2]), type=arrow, label="")
-    viewer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(-np.pi/2, np.pi/2, 0), size=[0.01, 0.01, 2], rgba=np.array([0, 1, 0, 0.2]), type=arrow, label="")
+    marker_drawer.add_marker(pos=[0, 0, 0], size=np.ones(3)*0.05, rgba=np.array([1, 1, 1, 1]), type=sphere, label="")
+    marker_drawer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(0, 0, 0), size=[0.01, 0.01, 2], rgba=np.array([0, 0, 1, 0.2]), type=arrow, label="")
+    marker_drawer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(0, np.pi/2, 0), size=[0.01, 0.01, 2], rgba=np.array([1, 0, 0, 0.2]), type=arrow, label="")
+    marker_drawer.add_marker(pos=[0, 0, 0], mat=tf3.euler.euler2mat(-np.pi/2, np.pi/2, 0), size=[0.01, 0.01, 2], rgba=np.array([0, 1, 0, 0.2]), type=arrow, label="")
     return
 
 def run(env, policy, args):
@@ -79,12 +133,13 @@ def run(env, policy, args):
 
     env.render()
     viewer = env.viewer
-    viewer._paused = True
+    env._viewer_paused = True
+    marker_drawer = MarkerDrawer(viewer)
     done = False
     ts, end_ts = 0, 2000
     ep_rewards = []
 
-    while (ts < end_ts):
+    while viewer.is_running() and (ts < end_ts):
         if hasattr(env, 'frame_skip'):
             start = time.time()
 
@@ -94,9 +149,12 @@ def run(env, policy, args):
         observation, _, done, info = env.step(action.copy())
         ep_rewards.append(info)
 
+        # Reset markers each frame and draw
+        marker_drawer.reset()
         if env.__class__.__name__ == 'JvrcStepEnv':
-            draw_targets(env.task, viewer)
-            draw_stuff(env.task, viewer)
+            draw_targets(env.task, marker_drawer)
+            draw_stuff(env.task, marker_drawer)
+        marker_drawer.finalize()
         env.render()
 
         if args.sync and hasattr(env, 'frame_skip'):
