@@ -3,15 +3,58 @@ import sys
 import argparse
 import ray
 from functools import partial
+from datetime import datetime
+import platform
+import os
 
 import numpy as np
 import torch
 import pickle
 import shutil
+import mujoco
 
 from rl.algos.ppo import PPO
 from rl.envs.wrappers import SymmetricEnv
 from rl.utils.eval import EvaluateEnv
+
+
+def print_system_info(args, training=True):
+    """Print system and training configuration info."""
+    print("=" * 60)
+    print("System Information")
+    print("=" * 60)
+    print(f"MuJoCo version: {mujoco.__version__}")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"Ray version: {ray.__version__}")
+    print(f"Platform: {platform.system()} {platform.release()}")
+    print(f"CPU: {platform.processor() or 'N/A'}")
+    print(f"CPU count: {os.cpu_count()}")
+    if training:
+        print("-" * 60)
+        print("Training Configuration")
+        print("-" * 60)
+        print(f"Environment: {args.env}")
+        print(f"Log directory: {args.logdir}")
+        print(f"Num processes: {args.num_procs}")
+        print(f"Learning rate: {args.lr}")
+        print(f"Max trajectory length: {args.max_traj_len}")
+        print(f"Iterations: {args.n_itr}")
+    print("=" * 60)
+
+
+def get_latest_run_dir(logdir):
+    """Find the most recent run subdirectory under logdir."""
+    logdir = Path(logdir)
+    if not logdir.exists():
+        return None
+
+    subdirs = [d for d in logdir.iterdir() if d.is_dir()]
+    if not subdirs:
+        return None
+
+    # Sort by modification time, most recent first
+    subdirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    return subdirs[0]
 
 def import_env(env_name_str):
     if env_name_str=='jvrc_walk':
@@ -25,6 +68,14 @@ def import_env(env_name_str):
     return Env
 
 def run_experiment(args):
+    # Create timestamped subdirectory: yy-mm-dd-hh-mm-ss_env_name
+    timestamp = datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+    run_name = f"{timestamp}_{args.env}"
+    args.logdir = Path(args.logdir) / run_name
+
+    # Print system info before training
+    print_system_info(args)
+
     # import the correct environment
     Env = import_env(args.env)
 
@@ -100,21 +151,35 @@ if __name__ == "__main__":
     elif sys.argv[1] == 'eval':
         sys.argv.remove(sys.argv[1])
 
-        parser.add_argument("--path", required=False, type=Path, default=Path("/tmp/logs"),
-                            help="Path to trained model dir")
+        parser.add_argument("--path", required=False, type=Path, default=None,
+                            help="Path to trained model (actor.pt file or directory containing it)")
+        parser.add_argument("--logdir", required=False, type=Path, default=None,
+                            help="Path to log directory; will use actor.pt from most recent run")
         parser.add_argument("--out-dir", required=False, type=Path, default=None,
                             help="Path to directory to save videos")
         parser.add_argument("--ep-len", required=False, type=int, default=10,
                             help="Episode length to play (in seconds)")
         args = parser.parse_args()
 
-        path_to_actor = ""
-        if args.path.is_file() and args.path.suffix==".pt":
-            path_to_actor = args.path
-        elif args.path.is_dir():
-            path_to_actor = Path(args.path, "actor.pt")
+        # Determine path to actor
+        path_to_actor = None
+        if args.path is not None:
+            # Use --path if provided
+            if args.path.is_file() and args.path.suffix == ".pt":
+                path_to_actor = args.path
+            elif args.path.is_dir():
+                path_to_actor = Path(args.path, "actor.pt")
+            else:
+                raise Exception("Invalid path to actor module: ", args.path)
+        elif args.logdir is not None:
+            # Use --logdir: find most recent run subdirectory
+            latest_run = get_latest_run_dir(args.logdir)
+            if latest_run is None:
+                raise Exception(f"No run directories found under: {args.logdir}")
+            path_to_actor = Path(latest_run, "actor.pt")
+            print(f"Using most recent run: {latest_run}")
         else:
-            raise Exception("Invalid path to actor module: ", args.path)
+            raise Exception("Must provide either --path or --logdir")
 
         path_to_critic = Path(path_to_actor.parent, "critic" + str(path_to_actor).split('actor')[1])
         path_to_pkl = Path(path_to_actor.parent, "experiment.pkl")
@@ -129,6 +194,9 @@ if __name__ == "__main__":
 
         # load experiment args
         run_args = pickle.load(open(path_to_pkl, "rb"))
+
+        # Print system info
+        print_system_info(args, training=False)
 
         # import the correct environment
         Env = import_env(run_args.env)

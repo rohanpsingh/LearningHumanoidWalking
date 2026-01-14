@@ -4,6 +4,8 @@ import numpy as np
 import mujoco
 import mujoco.viewer
 
+from envs.common.marker_drawer import MarkerDrawer
+
 DEFAULT_SIZE = 500
 
 class MujocoEnv():
@@ -23,6 +25,7 @@ class MujocoEnv():
         self.data = mujoco.MjData(self.model)
         self.viewer = None
         self._viewer_paused = False
+        self._marker_drawer = None
 
         # set frame skip and sim dt
         self.frame_skip = (control_dt/sim_dt)
@@ -128,12 +131,31 @@ class MujocoEnv():
     def dt(self):
         return self.model.opt.timestep * self.frame_skip
 
+    def draw_markers(self, marker_drawer):
+        """Draw task-specific markers in the viewer.
+
+        Override this method in subclasses to draw custom visualizations
+        (e.g., step targets, goal positions, debug info).
+
+        Args:
+            marker_drawer: MarkerDrawer instance for adding geometries
+        """
+        pass
+
     def render(self):
         if self.viewer is None:
             self.viewer = mujoco.viewer.launch_passive(
                 self.model, self.data, key_callback=self._key_callback
             )
+            self._marker_drawer = MarkerDrawer(self.viewer)
             self.viewer_setup()
+
+        # Draw markers if we have a marker drawer
+        if self._marker_drawer is not None:
+            self._marker_drawer.reset()
+            self.draw_markers(self._marker_drawer)
+            self._marker_drawer.finalize()
+
         # Block while paused, but keep viewer responsive
         while self._viewer_paused and self.viewer.is_running():
             self.viewer.sync()
