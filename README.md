@@ -4,14 +4,14 @@
   <a href="https://www.youtube.com/watch?v=ZgfNzGAkk2Q"><img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" alt="humanoid-walk" style="width:1000px"/></a>
 </p>
 
-Code for the papers:  
-- [**Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning**](https://ieeexplore.ieee.org/abstract/document/10769793)  
+Code for the papers:
+- [**Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning**](https://ieeexplore.ieee.org/abstract/document/10769793)
 [Rohan P. Singh](https://rohanpsingh.github.io), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Zhaoming Xie](https://zhaomingxie.github.io/), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
-- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)  
+- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)
 [Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
-- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)  
+- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)
 [Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
 
@@ -31,12 +31,12 @@ LearningHumanoidWalking/
 - [uv](https://docs.astral.sh/uv/) package manager
 
 ```bash
-uv sync
+$ uv sync
 ```
 
 ## Usage:
 
-Environment names supported:  
+Environment names supported:
 
 | Task Description      | Environment name |
 | ----------- | ----------- |
@@ -45,7 +45,7 @@ Environment names supported:
 | Stepping Task (using footsteps)  | 'jvrc_step' |
 
 
-#### **To train:** 
+#### **To train:**
 
 ```
 $ uv run run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_cpu_procs> --env <name_of_environment>
@@ -59,21 +59,18 @@ Note: Setting `RAY_ADDRESS=` ensures Ray starts a new local cluster instead of c
 $ uv run run_experiment.py eval --logdir <path_to_actor_pt>
 ```
 
-Or, we could write a rollout script specific to each environment.    
-For example, `debug_stepper.py` can be used with the `jvrc_step` environment.  
-```
-$ uv run scripts/debug_stepper.py --path <path_to_exp_dir>
-```
+Or, we could write a rollout script specific to each environment.
+
 
 #### **What you should see:**
 
-*Ascending stairs:*  
+*Ascending stairs:*
 ![climb_up](https://user-images.githubusercontent.com/16384313/180697513-25796b1a-87e0-4ab2-9e5f-d86c58ebea36.gif)
 
-*Descending stairs:*  
+*Descending stairs:*
 ![climb_down](https://user-images.githubusercontent.com/16384313/180697788-d1a2eec0-0d3d-451a-95e0-9f0e60191c34.gif)
 
-*Walking on curves:*  
+*Walking on curves:*
 ![curve](https://user-images.githubusercontent.com/16384313/180697266-7b44beb3-38bf-4494-b568-963919dc1106.gif)
 
 
@@ -105,7 +102,7 @@ For simulating "back-emf" effect and other randomizations:
 }
 ```
 
-For walking on footsteps:  
+For walking on footsteps:
 
 ```
 @inproceedings{singh2022learning,
@@ -120,4 +117,3 @@ For walking on footsteps:
 
 ### Credits
 The code in this repository was heavily inspired from [apex](https://github.com/osudrl/apex). Clock-based reward terms and some other ideas were originally proposed by the team from OSU DRL for the Cassie robot, so please also consider citing the works of Jonah Siekmann, Helei Duan, Jeremy Dao, and others.
-
