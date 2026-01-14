@@ -48,20 +48,21 @@ Environment names supported:
 #### **To train:** 
 
 ```
-$ python run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_cpu_procs> --env <name_of_environment>
-```  
+$ uv run run_experiment.py train --logdir <path_to_exp_dir> --num_procs <num_of_cpu_procs> --env <name_of_environment>
+```
 
+Note: Setting `RAY_ADDRESS=` ensures Ray starts a new local cluster instead of connecting to an existing one.
 
 #### **To play:**
 
 ```
-$ python run_experiment.py eval --logdir <path_to_actor_pt>
+$ uv run run_experiment.py eval --logdir <path_to_actor_pt>
 ```
 
 Or, we could write a rollout script specific to each environment.    
 For example, `debug_stepper.py` can be used with the `jvrc_step` environment.  
 ```
-$ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_dir>
+$ uv run scripts/debug_stepper.py --path <path_to_exp_dir>
 ```
 
 #### **What you should see:**
