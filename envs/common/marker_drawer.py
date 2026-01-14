@@ -35,7 +35,7 @@ class MarkerDrawer:
         """Set the final geometry count after all markers are added."""
         self.viewer.user_scn.ngeom = self.geom_idx
 
-    def add_marker(self, pos, size, rgba, type, mat=None, label=""):
+    def add_marker(self, pos, size, rgba, type, mat=None):
         """Add a marker geometry to the viewer scene.
 
         Args:
@@ -44,7 +44,6 @@ class MarkerDrawer:
             rgba: Color [r, g, b, a]
             type: mujoco.mjtGeom type (e.g., mjGEOM_SPHERE, mjGEOM_ARROW)
             mat: 3x3 rotation matrix (default: identity)
-            label: Unused (kept for API compatibility)
         """
         if self.geom_idx >= self.viewer.user_scn.maxgeom:
             return  # Can't add more geometries
