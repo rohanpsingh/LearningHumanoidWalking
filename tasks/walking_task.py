@@ -1,6 +1,7 @@
 import numpy as np
 import transforms3d as tf3
 from tasks import rewards
+from tasks.base_task import BaseTask
 from enum import Enum, auto
 
 class WalkModes(Enum):
@@ -24,7 +25,7 @@ class WalkModes(Enum):
         if self.name == 'FORWARD':
             return np.random.uniform(0., 0.4)
 
-class WalkingTask(object):
+class WalkingTask(BaseTask):
     """Dynamically stable walking on biped."""
 
     def __init__(self,
@@ -135,6 +136,9 @@ class WalkingTask(object):
                                                             np.random.uniform(-0.5, 0.5),
                                                             np.random.uniform(-0.015, -0.035)]
         return
+
+    def substep(self) -> None:
+        pass
 
     def done(self):
         contact_flag = self._client.check_self_collisions()

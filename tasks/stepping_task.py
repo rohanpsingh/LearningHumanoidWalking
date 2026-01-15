@@ -2,6 +2,7 @@ import numpy as np
 import random
 import transforms3d as tf3
 from tasks import rewards
+from tasks.base_task import BaseTask
 from enum import Enum, auto
 
 class WalkModes(Enum):
@@ -12,7 +13,7 @@ class WalkModes(Enum):
     INPLACE = auto()
     LATERAL = auto()
 
-class SteppingTask(object):
+class SteppingTask(BaseTask):
     """Bipedal locomotion by stepping on targets."""
 
     def __init__(self,
