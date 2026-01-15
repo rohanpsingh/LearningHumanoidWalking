@@ -4,17 +4,18 @@ from tasks import rewards
 from tasks.base_task import BaseTask
 from enum import Enum, auto
 
+
 class WalkModes(Enum):
     STANDING = auto()
-    INPLACE  = auto()
-    FORWARD  = auto()
+    INPLACE = auto()
+    FORWARD = auto()
 
     def encode(self):
-        if self.name=='STANDING':
+        if self.name == 'STANDING':
             return np.array([0, 0, 1])
-        elif self.name=='INPLACE':
+        elif self.name == 'INPLACE':
             return np.array([0, 1, 0])
-        elif self.name=='FORWARD':
+        elif self.name == 'FORWARD':
             return np.array([1, 0, 0])
 
     def sample_ref(self):
@@ -64,24 +65,40 @@ class WalkingTask(BaseTask):
         self._head_body_name = head_body
 
     def calc_reward(self, prev_torque, prev_action, action):
-        self.l_foot_vel = self._client.get_lfoot_body_vel(frame=1)[0]
-        self.r_foot_vel = self._client.get_rfoot_body_vel(frame=1)[0]
-        self.l_foot_frc = self._client.get_lfoot_grf()
-        self.r_foot_frc = self._client.get_rfoot_grf()
+        # Gather state from client
+        l_foot_vel = self._client.get_lfoot_body_vel(frame=1)[0]
+        r_foot_vel = self._client.get_rfoot_body_vel(frame=1)[0]
+        l_foot_frc = self._client.get_lfoot_grf()
+        r_foot_frc = self._client.get_rfoot_grf()
         head_pos = self._client.get_object_xpos_by_name(self._head_body_name, 'OBJ_BODY')[0:2]
         root_pos = self._client.get_object_xpos_by_name(self._root_body_name, 'OBJ_BODY')[0:2]
+        root_height = self._client.get_object_xpos_by_name(self._root_body_name, 'OBJ_BODY')[2]
+        root_vel = self._client.get_body_vel(self._root_body_name, frame=1)[0][0]
+        yaw_vel = self._client.get_qvel()[5]
+        qvel = self._client.get_qvel()
+        qacc = self._client.get_qacc()
+        current_torque = np.asarray(self._client.get_act_joint_torques())
         current_pose = np.array(self._client.get_act_joint_positions())
 
-        r_frc = self.right_clock[0]
-        l_frc = self.left_clock[0]
-        r_vel = self.right_clock[1]
-        l_vel = self.left_clock[1]
-        if self.mode == WalkModes.STANDING:
-            r_frc = (lambda _:1)
-            l_frc = (lambda _:1)
-            r_vel = (lambda _:-1)
-            l_vel = (lambda _:-1)
+        # Get contact point for height calculation
+        if self._client.check_rfoot_floor_collision() or self._client.check_lfoot_floor_collision():
+            contact_point_z = min([c.pos[2] for _, c in (self._client.get_rfoot_floor_contacts() +
+                                                          self._client.get_lfoot_floor_contacts())])
+        else:
+            contact_point_z = 0
 
+        # Determine clock functions based on mode
+        r_frc_fn = self.right_clock[0]
+        l_frc_fn = self.left_clock[0]
+        r_vel_fn = self.right_clock[1]
+        l_vel_fn = self.left_clock[1]
+        if self.mode == WalkModes.STANDING:
+            r_frc_fn = (lambda _: 1)
+            l_frc_fn = (lambda _: 1)
+            r_vel_fn = (lambda _: -1)
+            l_vel_fn = (lambda _: -1)
+
+        # Determine speed/yaw targets based on mode
         if self.mode == WalkModes.STANDING:
             self._goal_speed_ref = 0
             yaw_vel_ref = 0
@@ -92,17 +109,21 @@ class WalkingTask(BaseTask):
             self._goal_speed_ref = self.mode_ref
             yaw_vel_ref = 0
 
-        # WARNING: This assumes leg joints to be at [:12]
-        reward = dict(foot_frc_score=0.225 * rewards._calc_foot_frc_clock_reward(self, l_frc, r_frc),
-                      foot_vel_score=0.225 * rewards._calc_foot_vel_clock_reward(self, l_vel, r_vel),
-                      root_accel=0.050 * rewards._calc_root_accel_reward(self),
-                      height_error=0.050 * rewards._calc_height_reward(self),
-                      com_vel_error=0.150 * rewards._calc_fwd_vel_reward(self),
-                      yaw_vel_error=0.150 * rewards._calc_yaw_vel_reward(self, yaw_vel_ref),
-                      upper_body_reward=0.050 * np.exp(-10*np.linalg.norm(head_pos-root_pos)),
-                      posture_error=0.050 * np.exp(-np.linalg.norm(self._neutral_pose[:12]-current_pose[:12])),
-                      torque_penalty=0.025 * rewards._calc_torque_reward(self, prev_torque),
-                      action_penalty=0.025 * rewards._calc_action_reward(self, action, prev_action),
+        # Calculate rewards with explicit parameters
+        reward = dict(
+            foot_frc_score=0.225 * rewards.calc_foot_frc_clock_reward(
+                l_foot_frc, r_foot_frc, self._phase, l_frc_fn, r_frc_fn, self._mass),
+            foot_vel_score=0.225 * rewards.calc_foot_vel_clock_reward(
+                l_foot_vel, r_foot_vel, self._phase, l_vel_fn, r_vel_fn),
+            root_accel=0.050 * rewards.calc_root_accel_reward(qvel, qacc),
+            height_error=0.050 * rewards.calc_height_reward(
+                root_height, self._goal_height_ref, self._goal_speed_ref, contact_point_z),
+            com_vel_error=0.150 * rewards.calc_fwd_vel_reward(root_vel, self._goal_speed_ref),
+            yaw_vel_error=0.150 * rewards.calc_yaw_vel_reward(yaw_vel, yaw_vel_ref),
+            upper_body_reward=0.050 * np.exp(-10 * np.linalg.norm(head_pos - root_pos)),
+            posture_error=0.050 * np.exp(-np.linalg.norm(self._neutral_pose[:12] - current_pose[:12])),
+            torque_penalty=0.025 * rewards.calc_torque_reward(current_torque, prev_torque),
+            action_penalty=0.025 * rewards.calc_action_reward(action, prev_action),
         )
         return reward
 
