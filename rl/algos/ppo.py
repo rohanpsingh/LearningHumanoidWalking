@@ -6,8 +6,6 @@ import torch.optim as optim
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn import functional as F
-from torch.utils.tensorboard import SummaryWriter
-
 from pathlib import Path
 import sys
 import time
@@ -20,6 +18,7 @@ from rl.storage.rollout_storage import PPOBuffer
 from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
 from rl.envs.normalize import get_normalization_params
+from rl.utils import TrainingLogger, ModelCheckpointer
 
 class PPO:
     def __init__(self, env_fn, args):
@@ -44,17 +43,16 @@ class PPO:
         self.batch_size = self.n_proc * self.max_traj_len
 
         self.total_steps = 0
-        self.highest_reward = -np.inf
 
         # counter for training iterations
         self.iteration_count = 0
 
-        # directory logging and saving weights
+        # directory for saving weights
         self.save_path = Path(args.logdir)
-        Path.mkdir(self.save_path, parents=True, exist_ok=True)
 
-        # create the summarywriter
-        self.writer = SummaryWriter(log_dir=self.save_path, flush_secs=10)
+        # create logger and checkpointer
+        self.logger = TrainingLogger(self.save_path, flush_secs=10)
+        self.checkpointer = ModelCheckpointer(self.save_path)
 
         # create networks or load up pretrained
         obs_dim = env_fn().observation_space.shape[0]
@@ -102,15 +100,6 @@ class PPO:
         self.policy = policy
         self.critic = critic
         self.base_policy = base_policy
-
-    @staticmethod
-    def save(nets, save_path, suffix=""):
-        filetype = ".pt"
-        for name, net in nets.items():
-            path = Path(save_path, name + suffix + filetype)
-            torch.save(net, path)
-            print("Saved {} at {}".format(name, path))
-        return
 
     @ray.remote
     @torch.no_grad()
@@ -273,15 +262,12 @@ class PPO:
             batch = self.sample_parallel(env_fn, *nets.values(), deterministic=True)
             eval_batches.append(batch)
 
-        # save all the networks
-        self.save(nets, self.save_path, "_" + repr(itr))
-
-        # save as actor.pt, if it is best
-        eval_ep_rewards = [float(i) for i in batch.ep_rewards for batch in eval_batches]
+        # calculate average evaluation reward
+        eval_ep_rewards = [float(i) for batch in eval_batches for i in batch.ep_rewards]
         avg_eval_ep_rewards = np.mean(eval_ep_rewards)
-        if self.highest_reward < avg_eval_ep_rewards:
-            self.highest_reward = avg_eval_ep_rewards
-            self.save(nets, self.save_path)
+
+        # save checkpoint - saves with suffix and as best if improved
+        self.checkpointer.save_if_best(nets, avg_eval_ep_rewards, itr)
 
         return eval_batches
 
@@ -419,15 +405,17 @@ class PPO:
                 print("(Episode length:{:.3f}. Reward:{:.3f}. Time taken:{:.2f}s)".format(
                     avg_eval_ep_lens, avg_eval_ep_rewards, eval_time))
 
-                # tensorboard logging
-                self.writer.add_scalar("Eval/mean_reward", avg_eval_ep_rewards, itr)
-                self.writer.add_scalar("Eval/mean_episode_length", avg_eval_ep_lens, itr)
+                # tensorboard logging for evaluation
+                self.logger.log_eval_metrics(avg_eval_ep_rewards, avg_eval_ep_lens, itr)
 
-            # tensorboard logging
-            self.writer.add_scalar("Loss/actor", np.mean(actor_losses), itr)
-            self.writer.add_scalar("Loss/critic", np.mean(critic_losses), itr)
-            self.writer.add_scalar("Loss/mirror", np.mean(mirror_losses), itr)
-            self.writer.add_scalar("Loss/imitation", np.mean(imitation_losses), itr)
-            self.writer.add_scalar("Train/mean_reward", torch.mean(batch.ep_rewards), itr)
-            self.writer.add_scalar("Train/mean_episode_length", torch.mean(batch.ep_lens), itr)
-            self.writer.add_scalar("Train/mean_noise_std", np.mean(action_noise), itr)
+            # tensorboard logging for training
+            self.logger.log_training_metrics(
+                actor_loss=np.mean(actor_losses),
+                critic_loss=np.mean(critic_losses),
+                mirror_loss=np.mean(mirror_losses),
+                imitation_loss=np.mean(imitation_losses),
+                mean_reward=float(torch.mean(batch.ep_rewards)),
+                mean_ep_len=float(torch.mean(batch.ep_lens)),
+                mean_noise_std=np.mean(action_noise),
+                step=itr,
+            )
