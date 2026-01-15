@@ -8,9 +8,16 @@ import numpy as np
 
 def _calc_fwd_vel_reward(self):
     # forward vel reward
-    root_vel = self._client.get_qvel()[0]
+    #root_vel = self._client.get_qvel()[0]
+    root_vel = self._client.get_body_vel(self._root_body_name, frame=1)[0][0]
     error = np.linalg.norm(root_vel - self._goal_speed_ref)
-    return np.exp(-error)
+    return np.exp(-10*(error**2))
+
+def _calc_yaw_vel_reward(self, yaw_vel_ref=0):
+    # angular vel reward
+    yaw_vel = self._client.get_qvel()[5]
+    error = np.linalg.norm(yaw_vel - yaw_vel_ref)
+    return np.exp(-10*(error**3))
 
 def _calc_action_reward(self, action, prev_action):
     # action reward

@@ -2,6 +2,7 @@ import os
 import numpy as np
 import transforms3d as tf3
 import collections
+import mujoco
 
 from tasks import walking_task
 from robots.robot_base import RobotBase
@@ -61,6 +62,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
                                              root_body='PELVIS_S',
                                              lfoot_body='L_ANKLE_P_S',
                                              rfoot_body='R_ANKLE_P_S',
+                                             head_body='NECK_P_S',
         )
         # set goal height
         self.task._goal_height_ref = 0.80
@@ -70,6 +72,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
 
         # set up robot
         self.robot = RobotBase(pdgains, control_dt, self.interface, self.task)
+        self.task._neutral_pose=self.nominal_pose
 
         # define indices for action and obs mirror fns
         base_mir_obs = [-0.1, 1,                   # root orient
@@ -79,7 +82,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
                         23, -24, -25, 26, -27, 28, # motor vel [1]
                         17, -18, -19, 20, -21, 22, # motor vel [2]
         ]
-        append_obs = [(len(base_mir_obs)+i) for i in range(3)]
+        append_obs = [(len(base_mir_obs)+i) for i in range(6)]
         self.robot.clock_inds = append_obs[0:2]
         self.robot.mirrored_obs = np.array(base_mir_obs + append_obs, copy=True).tolist()
         self.robot.mirrored_acts = [6, -7, -8, 9, -10, 11,
@@ -92,7 +95,7 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.prev_prediction = np.zeros(action_space_size)
 
         # set observation space
-        self.base_obs_len = 32
+        self.base_obs_len = 35
         self.observation_history = collections.deque(maxlen=self.history_len)
         self.observation_space = np.zeros(self.base_obs_len*self.history_len)
 
@@ -100,23 +103,25 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.obs_mean = np.concatenate((
             np.zeros(5),
             np.deg2rad(half_sitting_pose), np.zeros(12),
-            [0.5, 0.5, 0.5]
+            [0.5, 0.5, 0.5, 0, 0, 0]
         ))
 
         self.obs_std = np.concatenate((
             [0.2, 0.2, 1, 1, 1],
             0.5*np.ones(12), 4*np.ones(12),
-            [1, 1, 1,]
+            [1, 1, 1, 1, 1, 1]
         ))
 
         self.obs_mean = np.tile(self.obs_mean, self.history_len)
         self.obs_std = np.tile(self.obs_std, self.history_len)
 
+        self.reset_model()
+
     def get_obs(self):
         # external state
         clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
                  np.cos(2 * np.pi * self.task._phase / self.task._period)]
-        ext_state = np.concatenate((clock, [self.task._goal_speed_ref]))
+        ext_state = np.concatenate((clock, self.task.mode.encode(), [self.task.mode_ref]))
 
         # internal state
         qpos = np.copy(self.interface.get_qpos())
@@ -177,3 +182,60 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         self.observation_history = collections.deque(maxlen=self.history_len)
         obs = self.get_obs()
         return obs
+
+    def draw_markers(self, marker_drawer):
+        """Draw an arrow above the robot's head indicating walking mode and reference."""
+        if not hasattr(self.task, 'mode'):
+            return
+
+        arrow = mujoco.mjtGeom.mjGEOM_ARROW
+
+        # Get head position and add offset above
+        head_pos = self.interface.get_object_xpos_by_name(self.task._head_body_name, 'OBJ_BODY')
+        arrow_pos = [head_pos[0], head_pos[1], head_pos[2] + 0.3]
+
+        # Get root body orientation for forward direction
+        root_quat = self.interface.get_object_xquat_by_name(self.task._root_body_name, 'OBJ_BODY')
+        root_yaw = tf3.euler.quat2euler(root_quat)[2]
+
+        # Determine arrow direction and size based on mode
+        mode = self.task.mode
+        mode_ref = self.task.mode_ref
+        rgba_blue = np.array([0, 0, 1, 0.5])
+        rgba_green = np.array([0, 1, 0, 0.5])
+
+        if mode == walking_task.WalkModes.FORWARD:
+            # mode_ref is the speed reference (0 to 0.4)
+            arrow_length = abs(mode_ref)
+            arrow_mat = tf3.euler.euler2mat(0, np.pi/2, root_yaw)
+        elif mode == walking_task.WalkModes.INPLACE:
+            # mode_ref is the yaw velocity reference (-0.5 to 0.5)
+            arrow_length = mode_ref
+            arrow_mat = tf3.euler.euler2mat(0, 0, 0)
+        else:  # STANDING
+            arrow_length = 0.0
+            arrow_mat = tf3.euler.euler2mat(0, np.pi, 0)
+
+        arrow_size = [0.05, 0.05, 2*arrow_length]
+        marker_drawer.add_marker(pos=arrow_pos, mat=arrow_mat,
+                                 size=arrow_size, rgba=rgba_blue, type=arrow)
+
+        # Draw green arrow showing actual velocity
+        qvel = self.interface.get_qvel()
+        if mode == walking_task.WalkModes.FORWARD:
+            # Arrow points in actual velocity direction
+            vel_x, vel_y = qvel[0], qvel[1]
+            actual_length = np.sqrt(vel_x**2 + vel_y**2)
+            vel_yaw = np.arctan2(vel_y, vel_x)
+            actual_mat = tf3.euler.euler2mat(0, np.pi/2, vel_yaw)
+        elif mode == walking_task.WalkModes.INPLACE:
+            # Yaw velocity (rotation around z-axis)
+            actual_length = qvel[5]
+            actual_mat = tf3.euler.euler2mat(0, 0, 0)
+        else:  # STANDING
+            actual_length = 0.0
+            actual_mat = tf3.euler.euler2mat(0, np.pi, 0)
+
+        actual_arrow_size = [0.05, 0.05, 2*actual_length]
+        marker_drawer.add_marker(pos=arrow_pos, mat=actual_mat,
+                                 size=actual_arrow_size, rgba=rgba_green, type=arrow)
