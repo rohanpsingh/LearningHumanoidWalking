@@ -3,7 +3,22 @@ control_dt: 0.025
 obs_history_len: 1
 action_smoothing: 0.5
 
+# Path for exporting generated MuJoCo XML files
+# If not set, defaults to /tmp/mjcf-export
+xml_export_path: /tmp/mjcf-export
+
 kp: [200, 200, 200, 250, 80, 80,
     200, 200, 200, 250, 80, 80]
 kd: [20, 20, 20, 25, 8, 8,
-    20, 20, 20, 25, 8, 8,]
+    20, 20, 20, 25, 8, 8]
+
+# Half-sitting pose in degrees
+half_sitting_pose: [-30, 0, 0, 50, 0, -24,
+                    -30, 0, 0, 50, 0, -24]
+
+# Task parameters
+task:
+  goal_height: 0.80
+  total_duration: 1.1
+  swing_duration: 0.75
+  stance_duration: 0.35
