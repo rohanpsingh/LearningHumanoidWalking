@@ -223,11 +223,11 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         # Draw green arrow showing actual velocity
         qvel = self.interface.get_qvel()
         if mode == walking_task.WalkModes.FORWARD:
-            # Compute forward velocity in robot's frame
+            # Arrow points in actual velocity direction
             vel_x, vel_y = qvel[0], qvel[1]
-            forward_vel = vel_x * np.cos(root_yaw) + vel_y * np.sin(root_yaw)
-            actual_length = forward_vel
-            actual_mat = tf3.euler.euler2mat(0, np.pi/2, root_yaw)
+            actual_length = np.sqrt(vel_x**2 + vel_y**2)
+            vel_yaw = np.arctan2(vel_y, vel_x)
+            actual_mat = tf3.euler.euler2mat(0, np.pi/2, vel_yaw)
         elif mode == walking_task.WalkModes.INPLACE:
             # Yaw velocity (rotation around z-axis)
             actual_length = qvel[5]
