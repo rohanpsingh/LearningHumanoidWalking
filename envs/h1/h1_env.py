@@ -8,71 +8,10 @@ from robots.robot_base import RobotBase
 from envs.common import mujoco_env
 from envs.common import robot_interface
 from envs.common import config_builder
+from tasks.standing_task import StandingTask
 
 from .gen_xml import *
 
-class Task:
-    def __init__(self, client, neutral_pose):
-        self._client = client
-        self.neutral_pose = neutral_pose
-
-    def calc_reward(self, prev_torque, prev_action, action):
-        root_pose = self._client.get_object_affine_by_name("pelvis", 'OBJ_BODY')
-
-        # height reward
-        target_root_h = 0.98
-        root_h = root_pose[2, 3]
-        height_error = np.linalg.norm(root_h - target_root_h)
-
-        # upperbody reward
-        head_pose_offset = np.zeros(2)
-        head_pose = self._client.get_object_affine_by_name("torso_link", 'OBJ_BODY')
-        head_pos_in_robot_base = np.linalg.inv(root_pose).dot(head_pose)[:2, 3] - head_pose_offset
-        upperbody_error = np.linalg.norm(head_pos_in_robot_base)
-
-        # posture reward
-        current_pose = np.array(self._client.get_act_joint_positions())[:10]
-        posture_error = np.linalg.norm(current_pose - self.neutral_pose)
-
-        # torque reward
-        tau_error = np.linalg.norm(self._client.get_act_joint_torques())
-
-        # velocity reward
-        root_vel = self._client.get_body_vel("pelvis", frame=1)[0][:2]
-        fwd_vel_error = np.linalg.norm(root_vel)
-        yaw_vel = self._client.get_qvel()[5]
-        yaw_vel_error = np.linalg.norm(yaw_vel)
-
-        reward = {
-            "com_vel_error": 0.3 * np.exp(-4 * np.square(fwd_vel_error)),
-            "yaw_vel_error": 0.3 * np.exp(-4 * np.square(yaw_vel_error)),
-            "height": 0.1 * np.exp(-0.5 * np.square(height_error)),
-            "upperbody": 0.1 * np.exp(-40*np.square(upperbody_error)),
-            "joint_torque_reward": 0.1 * np.exp(-5e-5*np.square(tau_error)),
-            "posture": 0.1 * np.exp(-1*np.square(posture_error)),
-        }
-        return reward
-
-    def step(self):
-        pass
-
-    def substep(self):
-        pass
-
-    def done(self):
-        root_jnt_adr = self._client.model.body("pelvis").jntadr[0]
-        root_qpos_adr = self._client.model.joint(root_jnt_adr).qposadr[0]
-        qpos = self._client.get_qpos()[root_qpos_adr:root_qpos_adr+7]
-        contact_flag = self._client.check_self_collisions()
-        terminate_conditions = {"qpos[2]_ll":(qpos[2] < 0.9),
-                                "qpos[2]_ul":(qpos[2] > 1.4),
-                                "contact_flag":contact_flag,
-        }
-        done = True in terminate_conditions.values()
-        return done
-
-    def reset(self):
-        pass
 
 class H1Env(mujoco_env.MujocoEnv):
     def __init__(self, path_to_yaml = None):
@@ -128,7 +67,7 @@ class H1Env(mujoco_env.MujocoEnv):
         self.nominal_pose = base_position + base_orientation + half_sitting_pose
 
         # set up task
-        self.task = Task(self.interface, half_sitting_pose)
+        self.task = StandingTask(self.interface, half_sitting_pose)
 
         self.robot = RobotBase(pdgains, control_dt, self.interface, self.task)
 
