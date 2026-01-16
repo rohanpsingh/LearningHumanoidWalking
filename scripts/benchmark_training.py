@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def run_training(env: str, n_itr: int, num_procs: int, logdir: Path) -> dict:
+def run_training(env: str, n_itr: int, num_procs: int, logdir: Path, device: str = "auto") -> dict:
     """Run training and capture metrics.
 
     Args:
@@ -27,6 +27,7 @@ def run_training(env: str, n_itr: int, num_procs: int, logdir: Path) -> dict:
         n_itr: Number of training iterations
         num_procs: Number of parallel processes
         logdir: Directory for logs
+        device: Device for training ('auto', 'cpu', 'cuda')
 
     Returns:
         Dictionary containing benchmark results
@@ -39,6 +40,7 @@ def run_training(env: str, n_itr: int, num_procs: int, logdir: Path) -> dict:
         "--logdir", str(logdir),
         "--no-mirror",  # Disable mirror for consistency
         "--eval-freq", str(n_itr + 1),  # Disable eval during benchmark
+        "--device", device,
     ]
 
     print(f"Running: {' '.join(cmd)}")
@@ -121,6 +123,7 @@ def run_training(env: str, n_itr: int, num_procs: int, logdir: Path) -> dict:
         "env": env,
         "n_itr": n_itr,
         "num_procs": num_procs,
+        "device": device,
         "total_time_seconds": round(total_time, 2),
         "avg_iteration_time": round(sum(iteration_times) / len(iteration_times), 3) if iteration_times else 0,
         "avg_sample_time": round(sum(sample_times) / len(sample_times), 3) if sample_times else 0,
@@ -214,6 +217,9 @@ def main():
                         help="JSON file with previous results to compare against")
     parser.add_argument("--label", type=str, default=None,
                         help="Label for this benchmark run")
+    parser.add_argument("--device", type=str, default="auto",
+                        choices=["auto", "cpu", "cuda"],
+                        help="Device for training: 'auto', 'cpu', or 'cuda' (default: auto)")
     args = parser.parse_args()
 
     # Create unique log directory
@@ -226,11 +232,12 @@ def main():
     print(f"Environment: {args.env}")
     print(f"Iterations:  {args.n_itr}")
     print(f"Processes:   {args.num_procs}")
+    print(f"Device:      {args.device}")
     print(f"Log dir:     {logdir}")
     print("=" * 60 + "\n")
 
     # Run benchmark
-    results = run_training(args.env, args.n_itr, args.num_procs, logdir)
+    results = run_training(args.env, args.n_itr, args.num_procs, logdir, args.device)
 
     if args.label:
         results["label"] = args.label

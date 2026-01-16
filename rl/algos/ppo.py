@@ -97,6 +97,34 @@ class PPO:
         if args.imitate:
             base_policy = torch.load(args.imitate, weights_only=False)
 
+        # Device setup (from args or auto-detect)
+        device_arg = getattr(args, 'device', 'auto')
+        if device_arg == 'auto':
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device_arg)
+
+        if self.device.type == 'cuda':
+            if not torch.cuda.is_available():
+                print("Warning: CUDA requested but not available, falling back to CPU")
+                self.device = torch.device('cpu')
+            else:
+                print(f"GPU detected: {torch.cuda.get_device_name(0)}")
+                print(f"Moving policy and critic to GPU...")
+                policy = policy.to(self.device)
+                critic = critic.to(self.device)
+                # Also move non-parameter tensors to GPU
+                policy.obs_mean = policy.obs_mean.to(self.device)
+                policy.obs_std = policy.obs_std.to(self.device)
+                critic.obs_mean = critic.obs_mean.to(self.device)
+                critic.obs_std = critic.obs_std.to(self.device)
+                # Move stds if it's a plain tensor (not nn.Parameter)
+                if not isinstance(policy.stds, torch.nn.Parameter):
+                    policy.stds = policy.stds.to(self.device)
+
+        if self.device.type == 'cpu':
+            print("Using CPU for training")
+
         self.old_policy = deepcopy(policy)
         self.policy = policy
         self.critic = critic
@@ -108,9 +136,28 @@ class PPO:
         # Create persistent worker actors - this is the key optimization.
         # Each worker creates its environment ONCE and reuses it across all iterations,
         # avoiding expensive MuJoCo model recompilation.
+        # Workers always use CPU (they do single-sample inference, no batching benefit)
         print(f"Creating {self.n_proc} persistent rollout workers...")
+
+        # Create CPU copies for workers (deepcopy to avoid reference issues)
+        if self.device.type == 'cuda':
+            # Networks are on GPU, need CPU copies for workers
+            policy_cpu = deepcopy(self.policy).cpu()
+            critic_cpu = deepcopy(self.critic).cpu()
+            # Move non-parameter tensors to CPU
+            policy_cpu.obs_mean = policy_cpu.obs_mean.cpu()
+            policy_cpu.obs_std = policy_cpu.obs_std.cpu()
+            critic_cpu.obs_mean = critic_cpu.obs_mean.cpu()
+            critic_cpu.obs_std = critic_cpu.obs_std.cpu()
+            if not isinstance(policy_cpu.stds, torch.nn.Parameter):
+                policy_cpu.stds = policy_cpu.stds.cpu()
+        else:
+            # Already on CPU
+            policy_cpu = self.policy
+            critic_cpu = self.critic
+
         self.workers = [
-            RolloutWorker.remote(env_fn, self.policy, self.critic)
+            RolloutWorker.remote(env_fn, policy_cpu, critic_cpu)
             for _ in range(self.n_proc)
         ]
         print("Workers created successfully.")
@@ -167,9 +214,10 @@ class PPO:
         """
         max_steps = (self.batch_size // self.n_proc)
 
-        # Get state dicts once - avoids repeated serialization
-        policy_state_dict = self.policy.state_dict()
-        critic_state_dict = self.critic.state_dict()
+        # Get state dicts and move to CPU for workers
+        # (Workers always run on CPU, even if main process is on GPU)
+        policy_state_dict = {k: v.cpu() for k, v in self.policy.state_dict().items()}
+        critic_state_dict = {k: v.cpu() for k, v in self.critic.state_dict().items()}
 
         # Update all workers' weights in parallel
         weight_futures = [
@@ -371,16 +419,18 @@ class PPO:
             # Use persistent workers instead of stateless Ray tasks
             # This avoids expensive environment recreation each iteration
             batch = self.sample_parallel_with_workers()
-            observations = batch.states.float()
-            actions = batch.actions.float()
-            returns = batch.returns.float()
-            values = batch.values.float()
+
+            # Move batch to device for training
+            observations = batch.states.float().to(self.device)
+            actions = batch.actions.float().to(self.device)
+            returns = batch.returns.float().to(self.device)
+            values = batch.values.float().to(self.device)
 
             num_samples = len(observations)
             elapsed = time.time() - sample_start_time
             print("Sampling took {:.2f}s for {} steps.".format(elapsed, num_samples))
 
-            # Normalize advantage
+            # Normalize advantage (on device)
             advantages = returns - values
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.eps)
 
