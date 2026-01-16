@@ -19,6 +19,7 @@ from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
 from rl.envs.normalize import get_normalization_params
 from rl.utils import TrainingLogger, ModelCheckpointer
+from rl.workers import RolloutWorker
 
 class PPO:
     def __init__(self, env_fn, args):
@@ -101,6 +102,19 @@ class PPO:
         self.critic = critic
         self.base_policy = base_policy
 
+        # Store env_fn for later use
+        self.env_fn = env_fn
+
+        # Create persistent worker actors - this is the key optimization.
+        # Each worker creates its environment ONCE and reuses it across all iterations,
+        # avoiding expensive MuJoCo model recompilation.
+        print(f"Creating {self.n_proc} persistent rollout workers...")
+        self.workers = [
+            RolloutWorker.remote(env_fn, self.policy, self.critic)
+            for _ in range(self.n_proc)
+        ]
+        print("Workers created successfully.")
+
     @ray.remote
     @torch.no_grad()
     @staticmethod
@@ -116,7 +130,7 @@ class PPO:
         memory_full = False
 
         while not memory_full:
-            state = torch.tensor(env.reset(), dtype=torch.float)
+            state = torch.as_tensor(env.reset(), dtype=torch.float)
             done = False
             traj_len = 0
 
@@ -130,25 +144,62 @@ class PPO:
                 action = policy(state, deterministic=deterministic)
                 value = critic(state)
 
-                next_state, reward, done, _ = env.step(action.numpy().copy())
+                # .numpy() is sufficient - env.step doesn't modify action in-place
+                next_state, reward, done, _ = env.step(action.numpy())
 
-                reward = torch.tensor(reward, dtype=torch.float)
+                reward = torch.as_tensor(reward, dtype=torch.float)
                 memory.store(state, action, reward, value, done)
                 memory_full = (len(memory) >= max_steps)
 
-                state = torch.tensor(next_state, dtype=torch.float)
+                state = torch.as_tensor(next_state, dtype=torch.float)
                 traj_len += 1
-
-                #if memory_full:
-                #   break
 
             value = critic(state)
             memory.finish_path(last_val=(not done) * value)
 
         return memory.get_data()
 
-    def sample_parallel(self, *args, deterministic=False):
+    def sample_parallel_with_workers(self, deterministic=False):
+        """Sample trajectories using persistent worker actors.
 
+        This method uses pre-created Ray actors that maintain persistent environments,
+        avoiding the expensive environment recreation that happens with stateless tasks.
+        """
+        max_steps = (self.batch_size // self.n_proc)
+
+        # Get state dicts once - avoids repeated serialization
+        policy_state_dict = self.policy.state_dict()
+        critic_state_dict = self.critic.state_dict()
+
+        # Update all workers' weights in parallel
+        weight_futures = [
+            w.set_weights.remote(policy_state_dict, critic_state_dict)
+            for w in self.workers
+        ]
+        ray.get(weight_futures)  # Wait for all weights to be updated
+
+        # Update iteration count on all workers
+        iter_futures = [
+            w.set_iteration_count.remote(self.iteration_count)
+            for w in self.workers
+        ]
+        ray.get(iter_futures)
+
+        # Collect samples from all workers in parallel
+        sample_futures = [
+            w.sample.remote(self.gamma, self.lam, max_steps, self.max_traj_len, deterministic)
+            for w in self.workers
+        ]
+        result = ray.get(sample_futures)
+
+        return self._aggregate_results(result)
+
+    def sample_parallel(self, *args, deterministic=False):
+        """Legacy sample_parallel for backward compatibility (e.g., evaluation).
+
+        This uses stateless Ray tasks which recreate environments each time.
+        For training, use sample_parallel_with_workers() instead.
+        """
         max_steps = (self.batch_size // self.n_proc)
         worker_args = (self.gamma, self.lam, self.iteration_count, max_steps, self.max_traj_len, deterministic)
         args = args + worker_args
@@ -158,11 +209,33 @@ class PPO:
         workers = [worker.remote(*args) for _ in range(self.n_proc)]
         result = ray.get(workers)
 
-        # Aggregate results
-        keys = result[0].keys()
-        aggregated_data = {
-            k: torch.cat([r[k] for r in result]) for k in keys
-        }
+        return self._aggregate_results(result)
+
+    def _aggregate_results(self, result):
+
+        # Aggregate results - handle traj_idx specially for recurrent policies
+        # (indices need to be offset to reference correct positions in concatenated data)
+        data_keys = ['states', 'actions', 'rewards', 'values', 'returns', 'dones']
+        aggregated_data = {k: torch.cat([r[k] for r in result]) for k in data_keys}
+
+        # Concatenate scalar metrics directly
+        aggregated_data['ep_lens'] = torch.cat([r['ep_lens'] for r in result])
+        aggregated_data['ep_rewards'] = torch.cat([r['ep_rewards'] for r in result])
+
+        # Fix traj_idx: offset each worker's indices by cumulative sample count
+        if self.recurrent:
+            traj_idx_list = []
+            offset = 0
+            for r in result:
+                # Skip the first 0 from subsequent workers (it's redundant)
+                worker_traj_idx = r['traj_idx']
+                if offset > 0:
+                    worker_traj_idx = worker_traj_idx[1:]  # Skip leading 0
+                traj_idx_list.append(worker_traj_idx + offset)
+                offset += len(r['states'])
+            aggregated_data['traj_idx'] = torch.cat(traj_idx_list)
+        else:
+            aggregated_data['traj_idx'] = torch.cat([r['traj_idx'] for r in result])
 
         class Data:
             def __init__(self, data):
@@ -198,7 +271,8 @@ class PPO:
         entropy_penalty = -(pdf.entropy() * mask).mean()
 
         # Mirror Symmetry Loss
-        deterministic_actions = self.policy(obs_batch)
+        # Reuse mean from distribution instead of redundant forward pass
+        deterministic_actions = pdf.mean
         if mirror_observation is not None and mirror_action is not None:
             if self.recurrent:
                 mir_obs = torch.stack([mirror_observation(obs_batch[i,:,:]) for i in range(obs_batch.shape[0])])
@@ -225,20 +299,19 @@ class PPO:
             log_ratio = log_probs - old_log_probs
             approx_kl_div = torch.mean((ratio - 1) - log_ratio)
 
+        # Combined loss for single backward pass (avoids retain_graph=True overhead)
+        actor_total_loss = actor_loss + self.mirror_coeff*mirror_loss + self.imitate_coeff*imitation_loss + self.ent_coeff*entropy_penalty
+        total_loss = actor_total_loss + critic_loss
+
         self.actor_optimizer.zero_grad()
-        (actor_loss + self.mirror_coeff*mirror_loss + self.imitate_coeff*imitation_loss + self.ent_coeff*entropy_penalty).backward(retain_graph=True)
+        self.critic_optimizer.zero_grad()
+        total_loss.backward()
 
         # Clip the gradient norm to prevent "unlucky" minibatches from
         # causing pathological updates
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.grad_clip)
-        self.actor_optimizer.step()
-
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward(retain_graph=True)
-
-        # Clip the gradient norm to prevent "unlucky" minibatches from
-        # causing pathological updates
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip)
+        self.actor_optimizer.step()
         self.critic_optimizer.step()
 
         return (
@@ -256,10 +329,10 @@ class PPO:
         for net in nets.values():
             net.eval()
 
-        # collect some batches of data
+        # collect some batches of data using persistent workers
         eval_batches = []
         for _ in range(num_batches):
-            batch = self.sample_parallel(env_fn, *nets.values(), deterministic=True)
+            batch = self.sample_parallel_with_workers(deterministic=True)
             eval_batches.append(batch)
 
         # calculate average evaluation reward
@@ -295,9 +368,9 @@ class PPO:
             self.iteration_count = itr
 
             sample_start_time = time.time()
-            policy_ref = ray.put(self.policy)
-            critic_ref = ray.put(self.critic)
-            batch = self.sample_parallel(env_fn, policy_ref, critic_ref)
+            # Use persistent workers instead of stateless Ray tasks
+            # This avoids expensive environment recreation each iteration
+            batch = self.sample_parallel_with_workers()
             observations = batch.states.float()
             actions = batch.actions.float()
             returns = batch.returns.float()
