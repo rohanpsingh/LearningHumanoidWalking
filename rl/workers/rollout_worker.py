@@ -9,6 +9,7 @@ import ray
 from copy import deepcopy
 
 from rl.storage.rollout_storage import PPOBuffer
+from rl.utils.seeding import set_global_seeds
 
 
 @ray.remote
@@ -20,15 +21,23 @@ class RolloutWorker:
     and reuses it across all training iterations.
     """
 
-    def __init__(self, env_fn, policy_template, critic_template):
+    def __init__(self, env_fn, policy_template, critic_template, seed=None):
         """Initialize worker with persistent environment.
 
         Args:
             env_fn: Factory function to create the environment (called once)
             policy_template: Policy network to clone for local inference
             critic_template: Critic network to clone for local inference
+            seed: Worker-specific seed for reproducibility
         """
+        self.seed = seed
+
+        # Seed worker-local RNG BEFORE creating environment
+        if seed is not None:
+            set_global_seeds(seed, cuda_deterministic=False)
+
         # Create environment ONCE - this is the key optimization
+        # Global RNG is already seeded above, so env will use seeded np.random
         self.env = env_fn()
 
         # Create local copies of networks for inference

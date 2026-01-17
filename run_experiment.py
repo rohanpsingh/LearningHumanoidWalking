@@ -16,6 +16,7 @@ import mujoco
 from rl.algos.ppo import PPO
 from rl.envs.wrappers import SymmetricEnv
 from rl.utils.eval import EvaluateEnv
+from rl.utils.seeding import set_global_seeds
 
 
 def print_system_info(args, training=True):
@@ -39,6 +40,10 @@ def print_system_info(args, training=True):
         print(f"Learning rate: {args.lr}")
         print(f"Max trajectory length: {args.max_traj_len}")
         print(f"Iterations: {args.n_itr}")
+        if hasattr(args, 'seed') and args.seed is not None:
+            print(f"Seed: {args.seed} (deterministic)")
+        else:
+            print("Seed: None (non-deterministic)")
     print("=" * 60)
 
 
@@ -108,7 +113,7 @@ def run_experiment(args):
         config_out_path = Path(args.logdir, "config.yaml")
         shutil.copyfile(args.yaml, config_out_path)
 
-    algo = PPO(env_fn, args)
+    algo = PPO(env_fn, args, seed=getattr(args, 'seed', None))
     algo.train(env_fn, args.n_itr)
 
 if __name__ == "__main__":
@@ -147,7 +152,14 @@ if __name__ == "__main__":
         parser.add_argument("--device", required=False, type=str, default="auto",
                             choices=["auto", "cpu", "cuda"],
                             help="Device for training: 'auto' (use GPU if available), 'cpu', or 'cuda'")
+        parser.add_argument("--seed", type=int, default=None,
+                            help="Random seed for reproducibility. If not set, training is non-deterministic.")
         args = parser.parse_args()
+
+        # Apply global seeding before any randomness
+        if args.seed is not None:
+            set_global_seeds(args.seed, cuda_deterministic=True)
+            print(f"Deterministic mode enabled with seed: {args.seed}")
 
         run_experiment(args)
 

@@ -7,12 +7,25 @@ import torch
 import ray
 
 from .wrappers import WrapEnv
+from rl.utils.seeding import set_global_seeds, get_worker_seed
 
 @ray.remote
-def _run_random_actions(iter, policy, env_fn, noise_std):
+def _run_random_actions(iter, policy, env_fn, noise_std, seed=None):
+    # Seed worker-local RNG before any randomness
+    if seed is not None:
+        set_global_seeds(seed, cuda_deterministic=False)
 
+    # Global RNG already seeded above, so env will use seeded np.random
     env = WrapEnv(env_fn)
+
     states = np.zeros((iter, env.observation_space.shape[0]))
+
+    # Create generator once for deterministic noise (reuse throughout loop)
+    if seed is not None:
+        noise_gen = torch.Generator()
+        noise_gen.manual_seed(seed)
+    else:
+        noise_gen = None
 
     state = env.reset()
     for t in range(iter):
@@ -23,19 +36,26 @@ def _run_random_actions(iter, policy, env_fn, noise_std):
         action = policy(state)
 
         # add gaussian noise to deterministic action
-        action = action + torch.randn(action.size()) * noise_std
+        noise = torch.randn(action.size(), generator=noise_gen) * noise_std
+        action = action + noise
 
         state, _, done, _ = env.step(action.data.numpy())
 
         if done:
             state = env.reset()
-    
+
     return states
 
-def get_normalization_params(iter, policy, env_fn, noise_std, procs=4):
+def get_normalization_params(iter, policy, env_fn, noise_std, procs=4, seed=None):
     print("Gathering input normalization data using {0} steps, noise = {1}...".format(iter, noise_std))
 
-    states_ids = [_run_random_actions.remote(iter // procs, policy, env_fn, noise_std) for _ in range(procs)]
+    states_ids = [
+        _run_random_actions.remote(
+            iter // procs, policy, env_fn, noise_std,
+            seed=get_worker_seed(seed, i, offset=1) if seed is not None else None
+        )
+        for i in range(procs)
+    ]
 
     states = []
     for _ in range(procs):
@@ -48,7 +68,7 @@ def get_normalization_params(iter, policy, env_fn, noise_std, procs=4):
     return np.mean(states, axis=0), np.sqrt(np.var(states, axis=0) + 1e-8)
 
 
-# returns a function that creates a normalized environment, then pre-normalizes it 
+# returns a function that creates a normalized environment, then pre-normalizes it
 # using states sampled from a deterministic policy with some added noise
 def PreNormalizer(iter, noise_std, policy, *args, **kwargs):
 
@@ -75,7 +95,7 @@ def PreNormalizer(iter, noise_std, policy, *args, **kwargs):
                 state = env.reset()
 
         env.online = online_val
-    
+
     def _Normalizer(venv):
         venv = Normalize(venv, *args, **kwargs)
 
@@ -98,15 +118,15 @@ class Normalize:
     """
     Vectorized environment base class
     """
-    def __init__(self, 
+    def __init__(self,
                  venv,
-                 ob_rms=None, 
-                 ob=True, 
-                 ret=False, 
-                 clipob=10., 
-                 cliprew=10., 
+                 ob_rms=None,
+                 ob=True,
+                 ret=False,
+                 clipob=10.,
+                 cliprew=10.,
                  online=True,
-                 gamma=1.0, 
+                 gamma=1.0,
                  epsilon=1e-8):
 
         self.venv = venv
@@ -134,19 +154,19 @@ class Normalize:
         obs = self._obfilt(obs)
 
         # NOTE: shifting mean of reward seems bad; qualitatively changes MDP
-        if self.ret_rms: 
+        if self.ret_rms:
             if self.online:
                 self.ret_rms.update(self.ret)
-            
+
             rews = np.clip(rews / np.sqrt(self.ret_rms.var + self.epsilon), -self.cliprew, self.cliprew)
 
         return obs, rews, news, infos
 
     def _obfilt(self, obs):
-        if self.ob_rms: 
+        if self.ob_rms:
             if self.online:
                 self.ob_rms.update(obs)
-            
+
             obs = np.clip((obs - self.ob_rms.mean) / np.sqrt(self.ob_rms.var + self.epsilon), -self.clipob, self.clipob)
             return obs
         else:
@@ -169,7 +189,7 @@ class Normalize:
 
     def close(self):
         self.venv.close()
-    
+
     def render(self):
         self.venv.render()
 
@@ -195,7 +215,7 @@ class RunningMeanStd(object):
         delta = batch_mean - self.mean
         tot_count = self.count + batch_count
 
-        new_mean = self.mean + delta * batch_count / tot_count        
+        new_mean = self.mean + delta * batch_count / tot_count
         m_a = self.var * (self.count)
         m_b = batch_var * (batch_count)
         M2 = m_a + m_b + np.square(delta) * self.count * batch_count / (self.count + batch_count)
@@ -205,7 +225,7 @@ class RunningMeanStd(object):
 
         self.mean = new_mean
         self.var = new_var
-        self.count = new_count        
+        self.count = new_count
 
 def test_runningmeanstd():
     for (x1, x2, x3) in [
