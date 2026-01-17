@@ -71,28 +71,42 @@ class SteppingTask(BaseTask):
         return (0.8*hit_reward + 0.2*progress_reward)
 
     def calc_reward(self, prev_torque, prev_action, action):
-        orient = tf3.euler.euler2quat(0, 0, self.sequence[self.t1][3])
-        r_frc = self.right_clock[0]
-        l_frc = self.left_clock[0]
-        r_vel = self.right_clock[1]
-        l_vel = self.left_clock[1]
-        if self.mode == WalkModes.STANDING:
-            r_frc = (lambda _:1)
-            l_frc = (lambda _:1)
-            r_vel = (lambda _:-1)
-            l_vel = (lambda _:-1)
+        # Gather state from client
+        target_orient = tf3.euler.euler2quat(0, 0, self.sequence[self.t1][3])
+        root_quat = self._client.get_object_xquat_by_name(self._root_body_name, 'OBJ_BODY')
+        root_height = self._client.get_object_xpos_by_name(self._root_body_name, 'OBJ_BODY')[2]
         head_pos = self._client.get_object_xpos_by_name(self._head_body_name, 'OBJ_BODY')[0:2]
         root_pos = self._client.get_object_xpos_by_name(self._root_body_name, 'OBJ_BODY')[0:2]
-        reward = dict(foot_frc_score=0.150 * rewards._calc_foot_frc_clock_reward(self, l_frc, r_frc),
-                      foot_vel_score=0.150 * rewards._calc_foot_vel_clock_reward(self, l_vel, r_vel),
-                      orient_cost=0.050 * rewards._calc_body_orient_reward(self,
-                                                                           self._root_body_name,
-                                                                           quat_ref=orient),
-                      height_error=0.050 * rewards._calc_height_reward(self),
-                      #torque_penalty=0.050 * rewards._calc_torque_reward(self, prev_torque),
-                      #action_penalty=0.050 * rewards._calc_action_reward(self, prev_action),
-                      step_reward=0.450 * self.step_reward(),
-                      upper_body_reward=0.050 * np.exp(-10*np.square(np.linalg.norm(head_pos-root_pos)))
+
+        # Get contact point for height calculation
+        if self._client.check_rfoot_floor_collision() or self._client.check_lfoot_floor_collision():
+            contact_point_z = min([c.pos[2] for _, c in (self._client.get_rfoot_floor_contacts() +
+                                                          self._client.get_lfoot_floor_contacts())])
+        else:
+            contact_point_z = 0
+
+        # Determine clock functions based on mode
+        r_frc_fn = self.right_clock[0]
+        l_frc_fn = self.left_clock[0]
+        r_vel_fn = self.right_clock[1]
+        l_vel_fn = self.left_clock[1]
+        if self.mode == WalkModes.STANDING:
+            r_frc_fn = (lambda _: 1)
+            l_frc_fn = (lambda _: 1)
+            r_vel_fn = (lambda _: -1)
+            l_vel_fn = (lambda _: -1)
+
+        # Calculate rewards with explicit parameters
+        reward = dict(
+            foot_frc_score=0.150 * rewards.calc_foot_frc_clock_reward(
+                self.l_foot_frc, self.r_foot_frc, self._phase, l_frc_fn, r_frc_fn, self._mass),
+            foot_vel_score=0.150 * rewards.calc_foot_vel_clock_reward(
+                self.l_foot_vel, self.r_foot_vel, self._phase, l_vel_fn, r_vel_fn),
+            orient_cost=0.050 * rewards.calc_body_orient_reward(root_quat, target_orient),
+            height_error=0.050 * rewards.calc_height_reward(
+                root_height, self._goal_height_ref, self._goal_speed_ref, contact_point_z),
+            step_reward=0.450 * self.step_reward(),
+            upper_body_reward=0.050 * np.exp(-10 * np.square(np.linalg.norm(head_pos - root_pos)))
         )
         return reward
 

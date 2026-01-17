@@ -3,11 +3,18 @@ control_dt: 0.025
 obs_history_len: 1
 action_smoothing: 0.5
 
+# Path for exporting generated MuJoCo XML files
+xml_export_path: /tmp/mjcf-export
+
 ctrllimited: false
 jointlimited: false
 reduced_xml: true
 
 init_noise: 3
+
+# Half-sitting pose in radians
+half_sitting_pose: [0, 0, -0.2, 0.6, -0.4,
+                    0, 0, -0.2, 0.6, -0.4]
 
 pdgains:
   "left_hip_yaw": [100, 10]

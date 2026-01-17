@@ -1,187 +1,63 @@
 import os
 import numpy as np
 import transforms3d as tf3
-import collections
 import mujoco
 
 from tasks import walking_task
-from robots.robot_base import RobotBase
-from envs.common import mujoco_env
-from envs.common import robot_interface
-from envs.common import config_builder
 
-from .gen_xml import *
+from .jvrc_base import JvrcBaseEnv
+from .gen_xml import builder
 
-class JvrcWalkEnv(mujoco_env.MujocoEnv):
-    def __init__(self, path_to_yaml = None):
 
-        ## Load CONFIG from yaml ##
-        if path_to_yaml is None:
-            path_to_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'configs/base.yaml')
+class JvrcWalkEnv(JvrcBaseEnv):
+    """JVRC humanoid walking environment."""
 
-        self.cfg = config_builder.load_yaml(path_to_yaml)
-
-        sim_dt = self.cfg.sim_dt
-        control_dt = self.cfg.control_dt
-        frame_skip = (control_dt/sim_dt)
-
-        self.history_len = self.cfg.obs_history_len
-
-        path_to_xml = '/tmp/mjcf-export/jvrc_walk/jvrc.xml'
+    def _build_xml(self) -> str:
+        export_dir = self._get_xml_export_dir('jvrc_walk')
+        path_to_xml = os.path.join(export_dir, 'jvrc.xml')
         if not os.path.exists(path_to_xml):
-            export_dir = os.path.dirname(path_to_xml)
-            builder(export_dir, config={
-            })
+            builder(export_dir, config={})
+        return path_to_xml
 
-        mujoco_env.MujocoEnv.__init__(self, path_to_xml, sim_dt, control_dt)
-
-        pdgains = np.zeros((2, 12))
-        pdgains[0] = self.cfg.kp
-        pdgains[1] = self.cfg.kd
-
-        # list of desired actuators
-        # RHIP_P, RHIP_R, RHIP_Y, RKNEE, RANKLE_R, RANKLE_P
-        # LHIP_P, LHIP_R, LHIP_Y, LKNEE, LANKLE_R, LANKLE_P
-        self.actuators = LEG_JOINTS
-
-        # define nominal pose
-        base_position = [0, 0, 0.81]
-        base_orientation = [1, 0, 0, 0]
-        half_sitting_pose = [-30,  0, 0, 50, 0, -24,
-                             -30,  0, 0, 50, 0, -24,
-        ] # degrees
-        self.nominal_pose = base_position + base_orientation + np.deg2rad(half_sitting_pose).tolist()
-
-        # set up interface
-        self.interface = robot_interface.RobotInterface(self.model, self.data, 'R_ANKLE_P_S', 'L_ANKLE_P_S', None)
-
-        # set up task
-        self.task = walking_task.WalkingTask(client=self.interface,
-                                             dt=control_dt,
-                                             neutral_foot_orient=np.array([1, 0, 0, 0]),
-                                             root_body='PELVIS_S',
-                                             lfoot_body='L_ANKLE_P_S',
-                                             rfoot_body='R_ANKLE_P_S',
-                                             head_body='NECK_P_S',
+    def _setup_task(self, control_dt: float) -> None:
+        self.task = walking_task.WalkingTask(
+            client=self.interface,
+            dt=control_dt,
+            neutral_foot_orient=np.array([1, 0, 0, 0]),
+            root_body=self.ROOT_BODY,
+            lfoot_body=self.LFOOT_BODY,
+            rfoot_body=self.RFOOT_BODY,
+            head_body=self.HEAD_BODY,
         )
-        # set goal height
-        self.task._goal_height_ref = 0.80
-        self.task._total_duration = 1.1
-        self.task._swing_duration = 0.75
-        self.task._stance_duration = 0.35
+        self.task._neutral_pose = self.nominal_pose
 
-        # set up robot
-        self.robot = RobotBase(pdgains, control_dt, self.interface, self.task)
-        self.task._neutral_pose=self.nominal_pose
+        # Set task parameters from config
+        task_cfg = self.cfg.task
+        self.task._goal_height_ref = task_cfg.goal_height
+        self.task._total_duration = task_cfg.total_duration
+        self.task._swing_duration = task_cfg.swing_duration
+        self.task._stance_duration = task_cfg.stance_duration
 
-        # define indices for action and obs mirror fns
-        base_mir_obs = [-0.1, 1,                   # root orient
-                        -2, 3, -4,                 # root ang vel
-                        11, -12, -13, 14, -15, 16, # motor pos [1]
-                         5,  -6,  -7,  8,  -9, 10, # motor pos [2]
-                        23, -24, -25, 26, -27, 28, # motor vel [1]
-                        17, -18, -19, 20, -21, 22, # motor vel [2]
-        ]
-        append_obs = [(len(base_mir_obs)+i) for i in range(6)]
-        self.robot.clock_inds = append_obs[0:2]
-        self.robot.mirrored_obs = np.array(base_mir_obs + append_obs, copy=True).tolist()
-        self.robot.mirrored_acts = [6, -7, -8, 9, -10, 11,
-                                    0.1, -1, -2, 3, -4, 5,]
+    def _get_num_external_obs(self) -> int:
+        return 6  # clock(2) + mode_encode(3) + mode_ref(1)
 
-        # set action space
-        action_space_size = len(self.actuators)
-        action = np.zeros(action_space_size)
-        self.action_space = np.zeros(action_space_size)
-        self.prev_prediction = np.zeros(action_space_size)
-
-        # set observation space
-        self.base_obs_len = 35
-        self.observation_history = collections.deque(maxlen=self.history_len)
-        self.observation_space = np.zeros(self.base_obs_len*self.history_len)
-
-        # manually define observation mean and std
+    def _setup_obs_normalization(self) -> None:
         self.obs_mean = np.concatenate((
             np.zeros(5),
-            np.deg2rad(half_sitting_pose), np.zeros(12),
+            np.deg2rad(self.half_sitting_pose), np.zeros(12),
             [0.5, 0.5, 0.5, 0, 0, 0]
         ))
-
         self.obs_std = np.concatenate((
             [0.2, 0.2, 1, 1, 1],
-            0.5*np.ones(12), 4*np.ones(12),
+            0.5 * np.ones(12), 4 * np.ones(12),
             [1, 1, 1, 1, 1, 1]
         ))
-
         self.obs_mean = np.tile(self.obs_mean, self.history_len)
         self.obs_std = np.tile(self.obs_std, self.history_len)
 
-        self.reset_model()
-
-    def get_obs(self):
-        # external state
-        clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
-                 np.cos(2 * np.pi * self.task._phase / self.task._period)]
-        ext_state = np.concatenate((clock, self.task.mode.encode(), [self.task.mode_ref]))
-
-        # internal state
-        qpos = np.copy(self.interface.get_qpos())
-        qvel = np.copy(self.interface.get_qvel())
-        root_r, root_p = tf3.euler.quat2euler(qpos[3:7])[0:2]
-        root_r = np.array([root_r])
-        root_p = np.array([root_p])
-        root_ang_vel = qvel[3:6]
-        motor_pos = self.interface.get_act_joint_positions()
-        motor_vel = self.interface.get_act_joint_velocities()
-
-        robot_state = np.concatenate([
-            root_r, root_p, root_ang_vel, motor_pos, motor_vel,
-        ])
-
-        state = np.concatenate([robot_state, ext_state])
-        assert state.shape==(self.base_obs_len,), \
-            "State vector length expected to be: {} but is {}".format(self.base_obs_len, len(state))
-
-        if len(self.observation_history)==0:
-            for _ in range(self.history_len):
-                self.observation_history.appendleft(np.zeros_like(state))
-            self.observation_history.appendleft(state)
-        else:
-            self.observation_history.appendleft(state)
-        return np.array(self.observation_history).flatten()
-
-    def step(self, action):
-        # Compute the applied action to actuators
-        # (targets <- Policy predictions)
-        targets = self.cfg.action_smoothing * action + \
-            (1 - self.cfg.action_smoothing) * self.prev_prediction
-        # (offsets <- Half-sitting pose)
-        offsets = [
-            self.nominal_pose[self.interface.get_jnt_qposadr_by_name(jnt)[0]]
-            for jnt in self.actuators
-        ]
-
-        rewards, done = self.robot.step(targets, np.asarray(offsets))
-        obs = self.get_obs()
-
-        self.prev_prediction = action
-
-        return obs, sum(rewards.values()), done, rewards
-
-    def reset_model(self):
-        init_qpos, init_qvel = self.nominal_pose.copy(), [0] * self.interface.nv()
-
-        # set up init state
-        self.set_state(
-            np.asarray(init_qpos),
-            np.asarray(init_qvel)
-        )
-
-        self.task.reset(iter_count=self.robot.iteration_count)
-
-        self.prev_prediction = np.zeros_like(self.prev_prediction)
-        self.observation_history = collections.deque(maxlen=self.history_len)
-        obs = self.get_obs()
-        return obs
+    def _get_external_state(self) -> np.ndarray:
+        clock = self._get_clock_signal()
+        return np.concatenate((clock, self.task.mode.encode(), [self.task.mode_ref]))
 
     def draw_markers(self, marker_drawer):
         """Draw an arrow above the robot's head indicating walking mode and reference."""
@@ -205,11 +81,9 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         rgba_green = np.array([0, 1, 0, 0.5])
 
         if mode == walking_task.WalkModes.FORWARD:
-            # mode_ref is the speed reference (0 to 0.4)
             arrow_length = abs(mode_ref)
             arrow_mat = tf3.euler.euler2mat(0, np.pi/2, root_yaw)
         elif mode == walking_task.WalkModes.INPLACE:
-            # mode_ref is the yaw velocity reference (-0.5 to 0.5)
             arrow_length = mode_ref
             arrow_mat = tf3.euler.euler2mat(0, 0, 0)
         else:  # STANDING
@@ -223,13 +97,11 @@ class JvrcWalkEnv(mujoco_env.MujocoEnv):
         # Draw green arrow showing actual velocity
         qvel = self.interface.get_qvel()
         if mode == walking_task.WalkModes.FORWARD:
-            # Arrow points in actual velocity direction
             vel_x, vel_y = qvel[0], qvel[1]
             actual_length = np.sqrt(vel_x**2 + vel_y**2)
             vel_yaw = np.arctan2(vel_y, vel_x)
             actual_mat = tf3.euler.euler2mat(0, np.pi/2, vel_yaw)
         elif mode == walking_task.WalkModes.INPLACE:
-            # Yaw velocity (rotation around z-axis)
             actual_length = qvel[5]
             actual_mat = tf3.euler.euler2mat(0, 0, 0)
         else:  # STANDING
