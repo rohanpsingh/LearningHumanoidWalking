@@ -3,8 +3,8 @@
 This module defines the TaskBase abstract base class that all task
 implementations must inherit from.
 """
+
 from abc import ABC, abstractmethod
-from typing import Dict
 
 import numpy as np
 
@@ -52,7 +52,7 @@ class BaseTask(ABC):
         prev_torque: np.ndarray,
         prev_action: np.ndarray,
         action: np.ndarray,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate reward components for the current step.
 
         Args:
@@ -75,10 +75,9 @@ class BaseTask(ABC):
         """
         pass
 
-    def substep(self) -> None:
+    def substep(self) -> None:  # noqa: B027
         """Optional hook for sub-control-step updates.
 
         Called for updates at a finer granularity than the control step.
         Default implementation does nothing.
         """
-        pass

@@ -1,17 +1,16 @@
-from pathlib import Path
-import sys
 import argparse
-import ray
-from functools import partial
-from datetime import datetime
-import platform
 import os
-
-import numpy as np
-import torch
 import pickle
+import platform
 import shutil
+import sys
+from datetime import datetime
+from functools import partial
+from pathlib import Path
+
 import mujoco
+import ray
+import torch
 
 from rl.algos.ppo import PPO
 from rl.envs.wrappers import SymmetricEnv
@@ -40,7 +39,7 @@ def print_system_info(args, training=True):
         print(f"Learning rate: {args.lr}")
         print(f"Max trajectory length: {args.max_traj_len}")
         print(f"Iterations: {args.n_itr}")
-        if hasattr(args, 'seed') and args.seed is not None:
+        if hasattr(args, "seed") and args.seed is not None:
             print(f"Seed: {args.seed} (deterministic)")
         else:
             print("Seed: None (non-deterministic)")
@@ -61,16 +60,18 @@ def get_latest_run_dir(logdir):
     subdirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     return subdirs[0]
 
+
 def import_env(env_name_str):
-    if env_name_str=='jvrc_walk':
+    if env_name_str == "jvrc_walk":
         from envs.jvrc import JvrcWalkEnv as Env
-    elif env_name_str=='jvrc_step':
+    elif env_name_str == "jvrc_step":
         from envs.jvrc import JvrcStepEnv as Env
-    elif env_name_str=='h1':
+    elif env_name_str == "h1":
         from envs.h1 import H1Env as Env
     else:
         raise Exception("Check env name!")
     return Env
+
 
 def run_experiment(args):
     # Create timestamped subdirectory: yy-mm-dd-hh-mm-ss_env_name
@@ -90,22 +91,25 @@ def run_experiment(args):
     if not args.no_mirror:
         try:
             print("Wrapping in SymmetricEnv.")
-            env_fn = partial(SymmetricEnv, env_fn,
-                             mirrored_obs=_env.robot.mirrored_obs,
-                             mirrored_act=_env.robot.mirrored_acts,
-                             clock_inds=_env.robot.clock_inds)
+            env_fn = partial(
+                SymmetricEnv,
+                env_fn,
+                mirrored_obs=_env.robot.mirrored_obs,
+                mirrored_act=_env.robot.mirrored_acts,
+                clock_inds=_env.robot.clock_inds,
+            )
         except AttributeError as e:
             print("Warning! Cannot use SymmetricEnv.", e)
 
     # Set up Parallelism
-    #os.environ['OMP_NUM_THREADS'] = '1'  # [TODO: Is this needed?]
+    # os.environ['OMP_NUM_THREADS'] = '1'  # [TODO: Is this needed?]
     if not ray.is_initialized():
         ray.init(num_cpus=args.num_procs)
 
     # dump hyperparameters
     Path.mkdir(args.logdir, parents=True, exist_ok=True)
     pkl_path = Path(args.logdir, "experiment.pkl")
-    with open(pkl_path, 'wb') as f:
+    with open(pkl_path, "wb") as f:
         pickle.dump(args, f)
 
     # copy config file
@@ -113,21 +117,21 @@ def run_experiment(args):
         config_out_path = Path(args.logdir, "config.yaml")
         shutil.copyfile(args.yaml, config_out_path)
 
-    algo = PPO(env_fn, args, seed=getattr(args, 'seed', None))
+    algo = PPO(env_fn, args, seed=getattr(args, "seed", None))
     algo.train(env_fn, args.n_itr)
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    if sys.argv[1] == 'train':
+    if sys.argv[1] == "train":
         sys.argv.remove(sys.argv[1])
 
         parser.add_argument("--env", required=True, type=str)
         parser.add_argument("--logdir", default=Path("/tmp/logs"), type=Path, help="Path to save weights and logs")
         parser.add_argument("--input-norm-steps", type=int, default=100000)
         parser.add_argument("--n-itr", type=int, default=20000, help="Number of iterations of the learning algorithm")
-        parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate") # Xie
+        parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate")  # Xie
         parser.add_argument("--eps", type=float, default=1e-5, help="Adam epsilon (for numerical stability)")
         parser.add_argument("--lam", type=float, default=0.95, help="Generalized advantage estimate discount")
         parser.add_argument("--gamma", type=float, default=0.99, help="MDP discount")
@@ -136,24 +140,44 @@ if __name__ == "__main__":
         parser.add_argument("--entropy-coeff", type=float, default=0.0, help="Coefficient for entropy regularization")
         parser.add_argument("--clip", type=float, default=0.2, help="Clipping parameter for PPO surrogate loss")
         parser.add_argument("--minibatch-size", type=int, default=64, help="Batch size for PPO updates")
-        parser.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs per PPO update") #Xie
-        parser.add_argument("--use-gae", type=bool, default=True,help="Whether or not to calculate returns using Generalized Advantage Estimation")
+        parser.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs per PPO update")  # Xie
+        parser.add_argument(
+            "--use-gae",
+            type=bool,
+            default=True,
+            help="Whether or not to calculate returns using Generalized Advantage Estimation",
+        )
         parser.add_argument("--num-procs", type=int, default=12, help="Number of threads to train on")
         parser.add_argument("--max-grad-norm", type=float, default=0.05, help="Value to clip gradients at")
         parser.add_argument("--max-traj-len", type=int, default=400, help="Max episode horizon")
         parser.add_argument("--no-mirror", required=False, action="store_true", help="to use SymmetricEnv")
         parser.add_argument("--mirror-coeff", required=False, default=0.4, type=float, help="weight for mirror loss")
-        parser.add_argument("--eval-freq", required=False, default=100, type=int, help="Frequency of performing evaluation")
+        parser.add_argument(
+            "--eval-freq", required=False, default=100, type=int, help="Frequency of performing evaluation"
+        )
         parser.add_argument("--continued", required=False, type=Path, help="path to pretrained weights")
         parser.add_argument("--recurrent", required=False, action="store_true", help="use LSTM instead of FF")
         parser.add_argument("--imitate", required=False, type=str, default=None, help="Policy to imitate")
-        parser.add_argument("--imitate-coeff", required=False, type=float, default=0.3, help="Coefficient for imitation loss")
-        parser.add_argument("--yaml", required=False, type=str, default=None, help="Path to config file passed to Env class")
-        parser.add_argument("--device", required=False, type=str, default="auto",
-                            choices=["auto", "cpu", "cuda"],
-                            help="Device for training: 'auto' (use GPU if available), 'cpu', or 'cuda'")
-        parser.add_argument("--seed", type=int, default=None,
-                            help="Random seed for reproducibility. If not set, training is non-deterministic.")
+        parser.add_argument(
+            "--imitate-coeff", required=False, type=float, default=0.3, help="Coefficient for imitation loss"
+        )
+        parser.add_argument(
+            "--yaml", required=False, type=str, default=None, help="Path to config file passed to Env class"
+        )
+        parser.add_argument(
+            "--device",
+            required=False,
+            type=str,
+            default="auto",
+            choices=["auto", "cpu", "cuda"],
+            help="Device for training: 'auto' (use GPU if available), 'cpu', or 'cuda'",
+        )
+        parser.add_argument(
+            "--seed",
+            type=int,
+            default=None,
+            help="Random seed for reproducibility. If not set, training is non-deterministic.",
+        )
         args = parser.parse_args()
 
         # Apply global seeding before any randomness
@@ -163,17 +187,29 @@ if __name__ == "__main__":
 
         run_experiment(args)
 
-    elif sys.argv[1] == 'eval':
+    elif sys.argv[1] == "eval":
         sys.argv.remove(sys.argv[1])
 
-        parser.add_argument("--path", required=False, type=Path, default=None,
-                            help="Path to trained model (actor.pt file or directory containing it)")
-        parser.add_argument("--logdir", required=False, type=Path, default=None,
-                            help="Path to log directory; will use actor.pt from most recent run")
-        parser.add_argument("--out-dir", required=False, type=Path, default=None,
-                            help="Path to directory to save videos")
-        parser.add_argument("--ep-len", required=False, type=int, default=10,
-                            help="Episode length to play (in seconds)")
+        parser.add_argument(
+            "--path",
+            required=False,
+            type=Path,
+            default=None,
+            help="Path to trained model (actor.pt file or directory containing it)",
+        )
+        parser.add_argument(
+            "--logdir",
+            required=False,
+            type=Path,
+            default=None,
+            help="Path to log directory; will use actor.pt from most recent run",
+        )
+        parser.add_argument(
+            "--out-dir", required=False, type=Path, default=None, help="Path to directory to save videos"
+        )
+        parser.add_argument(
+            "--ep-len", required=False, type=int, default=10, help="Episode length to play (in seconds)"
+        )
         args = parser.parse_args()
 
         # Determine path to actor
@@ -196,19 +232,17 @@ if __name__ == "__main__":
         else:
             raise Exception("Must provide either --path or --logdir")
 
-        path_to_critic = Path(path_to_actor.parent, "critic" + str(path_to_actor).split('actor')[1])
+        path_to_critic = Path(path_to_actor.parent, "critic" + str(path_to_actor).split("actor")[1])
         path_to_pkl = Path(path_to_actor.parent, "experiment.pkl")
 
         # load experiment args
-        run_args = pickle.load(open(path_to_pkl, "rb"))
+        with open(path_to_pkl, "rb") as f:
+            run_args = pickle.load(f)
         # load trained policy
         policy = torch.load(path_to_actor, weights_only=False)
         critic = torch.load(path_to_critic, weights_only=False)
         policy.eval()
         critic.eval()
-
-        # load experiment args
-        run_args = pickle.load(open(path_to_pkl, "rb"))
 
         # Print system info
         print_system_info(args, training=False)

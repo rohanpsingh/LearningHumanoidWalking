@@ -4,15 +4,13 @@ These tests are parametrized to run against ALL environments discovered
 under envs/. No hardcoded dimensions - everything is derived from the
 environment instances.
 """
-import pytest
-import numpy as np
-import torch
-from pathlib import Path
+
 from functools import partial
 
+import numpy as np
+import pytest
 import ray
-
-from conftest import DISCOVERED_ENVIRONMENTS, get_env_info
+import torch
 
 
 class TestPPOInitialization:
@@ -39,10 +37,10 @@ class TestPPOInitialization:
 
         ppo = PPO(env_factory, train_args)
 
-        assert ppo.policy.state_dim == obs_dim, \
-            f"Policy state_dim {ppo.policy.state_dim} != env obs_dim {obs_dim}"
-        assert ppo.policy.action_dim == action_dim, \
+        assert ppo.policy.state_dim == obs_dim, f"Policy state_dim {ppo.policy.state_dim} != env obs_dim {obs_dim}"
+        assert ppo.policy.action_dim == action_dim, (
             f"Policy action_dim {ppo.policy.action_dim} != env action_dim {action_dim}"
+        )
 
     def test_critic_produces_correct_output(self, env_factory, train_args, env_name):
         """Test critic network produces scalar value."""
@@ -65,8 +63,8 @@ class TestPPOInitialization:
 
         ppo = PPO(env_factory, train_args)
 
-        assert hasattr(ppo.policy, 'obs_mean')
-        assert hasattr(ppo.policy, 'obs_std')
+        assert hasattr(ppo.policy, "obs_mean")
+        assert hasattr(ppo.policy, "obs_std")
         assert ppo.policy.obs_mean is not None
         assert ppo.policy.obs_std is not None
 
@@ -92,7 +90,7 @@ class TestPPOSampling:
 
         batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
-        required_attrs = ['states', 'actions', 'rewards', 'returns', 'values', 'ep_rewards', 'ep_lens']
+        required_attrs = ["states", "actions", "rewards", "returns", "values", "ep_rewards", "ep_lens"]
         for attr in required_attrs:
             assert hasattr(batch, attr), f"Batch missing attribute: {attr}"
 
@@ -110,8 +108,7 @@ class TestPPOSampling:
 
         batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
-        assert batch.states.shape[1] == obs_dim, \
-            f"Sampled states dim {batch.states.shape[1]} != obs_dim {obs_dim}"
+        assert batch.states.shape[1] == obs_dim, f"Sampled states dim {batch.states.shape[1]} != obs_dim {obs_dim}"
 
     def test_sampled_actions_match_action_dimension(self, env_factory, train_args, env_name):
         """Test sampled actions have correct action dimension."""
@@ -127,8 +124,9 @@ class TestPPOSampling:
 
         batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
 
-        assert batch.actions.shape[1] == action_dim, \
+        assert batch.actions.shape[1] == action_dim, (
             f"Sampled actions dim {batch.actions.shape[1]} != action_dim {action_dim}"
+        )
 
     def test_sampled_values_are_scalars(self, env_factory, train_args, env_name):
         """Test sampled values are scalar per timestep."""
@@ -175,9 +173,7 @@ class TestPPOUpdate:
         return_batch = returns[indices]
         advantage_batch = advantages[indices]
 
-        result = ppo.update_actor_critic(
-            obs_batch, action_batch, return_batch, advantage_batch, mask=1
-        )
+        result = ppo.update_actor_critic(obs_batch, action_batch, return_batch, advantage_batch, mask=1)
 
         assert len(result) == 7  # Returns 7 scalars
         actor_loss, _, critic_loss, _, _, _, _ = result
@@ -209,13 +205,7 @@ class TestPPOUpdate:
         ppo.old_policy.load_state_dict(ppo.policy.state_dict())
 
         indices = list(range(min(32, len(observations))))
-        ppo.update_actor_critic(
-            observations[indices],
-            actions[indices],
-            returns[indices],
-            advantages[indices],
-            mask=1
-        )
+        ppo.update_actor_critic(observations[indices], actions[indices], returns[indices], advantages[indices], mask=1)
 
         # Check weights changed
         weights_changed = False
@@ -242,10 +232,8 @@ class TestTrainingLoop:
         ppo.train(env_factory, n_itr=1)
 
         # Check that weights were saved
-        assert (train_args.logdir / "actor_0.pt").exists(), \
-            f"actor_0.pt not saved for {env_name}"
-        assert (train_args.logdir / "critic_0.pt").exists(), \
-            f"critic_0.pt not saved for {env_name}"
+        assert (train_args.logdir / "actor_0.pt").exists(), f"actor_0.pt not saved for {env_name}"
+        assert (train_args.logdir / "critic_0.pt").exists(), f"critic_0.pt not saved for {env_name}"
 
 
 class TestSymmetricEnvWrapper:
@@ -257,7 +245,7 @@ class TestSymmetricEnvWrapper:
 
         base_env = env_factory()
 
-        if not hasattr(base_env.robot, 'mirrored_obs') or not hasattr(base_env.robot, 'mirrored_acts'):
+        if not hasattr(base_env.robot, "mirrored_obs") or not hasattr(base_env.robot, "mirrored_acts"):
             base_env.close()
             pytest.skip(f"{env_name} does not support mirror symmetry")
 
@@ -266,15 +254,15 @@ class TestSymmetricEnvWrapper:
             env_factory,
             mirrored_obs=base_env.robot.mirrored_obs,
             mirrored_act=base_env.robot.mirrored_acts,
-            clock_inds=getattr(base_env.robot, 'clock_inds', [])
+            clock_inds=getattr(base_env.robot, "clock_inds", []),
         )
 
         wrapped_env = wrapped_env_fn()
         obs = wrapped_env.reset()
 
         assert obs.shape == base_env.observation_space.shape
-        assert hasattr(wrapped_env, 'mirror_observation')
-        assert hasattr(wrapped_env, 'mirror_action')
+        assert hasattr(wrapped_env, "mirror_observation")
+        assert hasattr(wrapped_env, "mirror_action")
 
         base_env.close()
         wrapped_env.close()
@@ -285,7 +273,7 @@ class TestSymmetricEnvWrapper:
 
         base_env = env_factory()
 
-        if not hasattr(base_env.robot, 'mirrored_obs') or not hasattr(base_env.robot, 'mirrored_acts'):
+        if not hasattr(base_env.robot, "mirrored_obs") or not hasattr(base_env.robot, "mirrored_acts"):
             base_env.close()
             pytest.skip(f"{env_name} does not support mirror symmetry")
 
@@ -296,7 +284,7 @@ class TestSymmetricEnvWrapper:
             env_factory,
             mirrored_obs=base_env.robot.mirrored_obs,
             mirrored_act=base_env.robot.mirrored_acts,
-            clock_inds=getattr(base_env.robot, 'clock_inds', [])
+            clock_inds=getattr(base_env.robot, "clock_inds", []),
         )
 
         wrapped_env = wrapped_env_fn()

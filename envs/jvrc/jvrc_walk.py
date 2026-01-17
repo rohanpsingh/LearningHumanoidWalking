@@ -1,20 +1,21 @@
 import os
+
+import mujoco
 import numpy as np
 import transforms3d as tf3
-import mujoco
 
 from tasks import walking_task
 
-from .jvrc_base import JvrcBaseEnv
 from .gen_xml import builder
+from .jvrc_base import JvrcBaseEnv
 
 
 class JvrcWalkEnv(JvrcBaseEnv):
     """JVRC humanoid walking environment."""
 
     def _build_xml(self) -> str:
-        export_dir = self._get_xml_export_dir('jvrc_walk')
-        path_to_xml = os.path.join(export_dir, 'jvrc.xml')
+        export_dir = self._get_xml_export_dir("jvrc_walk")
+        path_to_xml = os.path.join(export_dir, "jvrc.xml")
         if not os.path.exists(path_to_xml):
             builder(export_dir, config={})
         return path_to_xml
@@ -42,16 +43,10 @@ class JvrcWalkEnv(JvrcBaseEnv):
         return 6  # clock(2) + mode_encode(3) + mode_ref(1)
 
     def _setup_obs_normalization(self) -> None:
-        self.obs_mean = np.concatenate((
-            np.zeros(5),
-            np.deg2rad(self.half_sitting_pose), np.zeros(12),
-            [0.5, 0.5, 0.5, 0, 0, 0]
-        ))
-        self.obs_std = np.concatenate((
-            [0.2, 0.2, 1, 1, 1],
-            0.5 * np.ones(12), 4 * np.ones(12),
-            [1, 1, 1, 1, 1, 1]
-        ))
+        self.obs_mean = np.concatenate(
+            (np.zeros(5), np.deg2rad(self.half_sitting_pose), np.zeros(12), [0.5, 0.5, 0.5, 0, 0, 0])
+        )
+        self.obs_std = np.concatenate(([0.2, 0.2, 1, 1, 1], 0.5 * np.ones(12), 4 * np.ones(12), [1, 1, 1, 1, 1, 1]))
         self.obs_mean = np.tile(self.obs_mean, self.history_len)
         self.obs_std = np.tile(self.obs_std, self.history_len)
 
@@ -61,17 +56,17 @@ class JvrcWalkEnv(JvrcBaseEnv):
 
     def draw_markers(self, marker_drawer):
         """Draw an arrow above the robot's head indicating walking mode and reference."""
-        if not hasattr(self.task, 'mode'):
+        if not hasattr(self.task, "mode"):
             return
 
         arrow = mujoco.mjtGeom.mjGEOM_ARROW
 
         # Get head position and add offset above
-        head_pos = self.interface.get_object_xpos_by_name(self.task._head_body_name, 'OBJ_BODY')
+        head_pos = self.interface.get_object_xpos_by_name(self.task._head_body_name, "OBJ_BODY")
         arrow_pos = [head_pos[0], head_pos[1], head_pos[2] + 0.3]
 
         # Get root body orientation for forward direction
-        root_quat = self.interface.get_object_xquat_by_name(self.task._root_body_name, 'OBJ_BODY')
+        root_quat = self.interface.get_object_xquat_by_name(self.task._root_body_name, "OBJ_BODY")
         root_yaw = tf3.euler.quat2euler(root_quat)[2]
 
         # Determine arrow direction and size based on mode
@@ -82,7 +77,7 @@ class JvrcWalkEnv(JvrcBaseEnv):
 
         if mode == walking_task.WalkModes.FORWARD:
             arrow_length = abs(mode_ref)
-            arrow_mat = tf3.euler.euler2mat(0, np.pi/2, root_yaw)
+            arrow_mat = tf3.euler.euler2mat(0, np.pi / 2, root_yaw)
         elif mode == walking_task.WalkModes.INPLACE:
             arrow_length = mode_ref
             arrow_mat = tf3.euler.euler2mat(0, 0, 0)
@@ -90,9 +85,8 @@ class JvrcWalkEnv(JvrcBaseEnv):
             arrow_length = 0.0
             arrow_mat = tf3.euler.euler2mat(0, np.pi, 0)
 
-        arrow_size = [0.05, 0.05, 2*arrow_length]
-        marker_drawer.add_marker(pos=arrow_pos, mat=arrow_mat,
-                                 size=arrow_size, rgba=rgba_blue, type=arrow)
+        arrow_size = [0.05, 0.05, 2 * arrow_length]
+        marker_drawer.add_marker(pos=arrow_pos, mat=arrow_mat, size=arrow_size, rgba=rgba_blue, type=arrow)
 
         # Draw green arrow showing actual velocity
         qvel = self.interface.get_qvel()
@@ -100,7 +94,7 @@ class JvrcWalkEnv(JvrcBaseEnv):
             vel_x, vel_y = qvel[0], qvel[1]
             actual_length = np.sqrt(vel_x**2 + vel_y**2)
             vel_yaw = np.arctan2(vel_y, vel_x)
-            actual_mat = tf3.euler.euler2mat(0, np.pi/2, vel_yaw)
+            actual_mat = tf3.euler.euler2mat(0, np.pi / 2, vel_yaw)
         elif mode == walking_task.WalkModes.INPLACE:
             actual_length = qvel[5]
             actual_mat = tf3.euler.euler2mat(0, 0, 0)
@@ -108,6 +102,5 @@ class JvrcWalkEnv(JvrcBaseEnv):
             actual_length = 0.0
             actual_mat = tf3.euler.euler2mat(0, np.pi, 0)
 
-        actual_arrow_size = [0.05, 0.05, 2*actual_length]
-        marker_drawer.add_marker(pos=arrow_pos, mat=actual_mat,
-                                 size=actual_arrow_size, rgba=rgba_green, type=arrow)
+        actual_arrow_size = [0.05, 0.05, 2 * actual_length]
+        marker_drawer.add_marker(pos=arrow_pos, mat=actual_mat, size=actual_arrow_size, rgba=rgba_green, type=arrow)

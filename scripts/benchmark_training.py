@@ -8,9 +8,9 @@ Usage:
     python scripts/benchmark_training.py --env jvrc_walk --n-itr 10
     python scripts/benchmark_training.py --env h1 --n-itr 10 --num-procs 4
 """
+
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -33,14 +33,22 @@ def run_training(env: str, n_itr: int, num_procs: int, logdir: Path, device: str
         Dictionary containing benchmark results
     """
     cmd = [
-        sys.executable, "run_experiment.py", "train",
-        "--env", env,
-        "--n-itr", str(n_itr),
-        "--num-procs", str(num_procs),
-        "--logdir", str(logdir),
+        sys.executable,
+        "run_experiment.py",
+        "train",
+        "--env",
+        env,
+        "--n-itr",
+        str(n_itr),
+        "--num-procs",
+        str(num_procs),
+        "--logdir",
+        str(logdir),
         "--no-mirror",  # Disable mirror for consistency
-        "--eval-freq", str(n_itr + 1),  # Disable eval during benchmark
-        "--device", device,
+        "--eval-freq",
+        str(n_itr + 1),  # Disable eval during benchmark
+        "--device",
+        device,
     ]
 
     print(f"Running: {' '.join(cmd)}")
@@ -205,21 +213,19 @@ def compare_results(results1: dict, results2: dict, label1: str, label2: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark training speed")
-    parser.add_argument("--env", type=str, default="jvrc_walk",
-                        help="Environment name (default: jvrc_walk)")
-    parser.add_argument("--n-itr", type=int, default=10,
-                        help="Number of training iterations (default: 10)")
-    parser.add_argument("--num-procs", type=int, default=12,
-                        help="Number of parallel processes (default: 12)")
-    parser.add_argument("--output", type=str, default=None,
-                        help="Output JSON file for results")
-    parser.add_argument("--compare", type=str, default=None,
-                        help="JSON file with previous results to compare against")
-    parser.add_argument("--label", type=str, default=None,
-                        help="Label for this benchmark run")
-    parser.add_argument("--device", type=str, default="auto",
-                        choices=["auto", "cpu", "cuda"],
-                        help="Device for training: 'auto', 'cpu', or 'cuda' (default: auto)")
+    parser.add_argument("--env", type=str, default="jvrc_walk", help="Environment name (default: jvrc_walk)")
+    parser.add_argument("--n-itr", type=int, default=10, help="Number of training iterations (default: 10)")
+    parser.add_argument("--num-procs", type=int, default=12, help="Number of parallel processes (default: 12)")
+    parser.add_argument("--output", type=str, default=None, help="Output JSON file for results")
+    parser.add_argument("--compare", type=str, default=None, help="JSON file with previous results to compare against")
+    parser.add_argument("--label", type=str, default=None, help="Label for this benchmark run")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help="Device for training: 'auto', 'cpu', or 'cuda' (default: auto)",
+    )
     args = parser.parse_args()
 
     # Create unique log directory

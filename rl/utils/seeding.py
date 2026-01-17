@@ -2,6 +2,7 @@
 
 import os
 import random
+
 import numpy as np
 import torch
 
@@ -26,7 +27,7 @@ def set_global_seeds(seed: int, cuda_deterministic: bool = True) -> None:
             torch.backends.cudnn.benchmark = False
 
     # Set PYTHONHASHSEED for dict ordering determinism
-    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
 
 
 def get_worker_seed(master_seed: int, worker_id: int, offset: int = 0) -> int:

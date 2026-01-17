@@ -1,7 +1,7 @@
 """Utility for drawing markers in the MuJoCo viewer."""
 
-import numpy as np
 import mujoco
+import numpy as np
 
 
 class MarkerDrawer:
@@ -67,6 +67,6 @@ class MarkerDrawer:
             size=geom_size,
             pos=np.array(pos, dtype=np.float64),
             mat=np.array(mat, dtype=np.float64).flatten(),
-            rgba=np.array(rgba, dtype=np.float32)
+            rgba=np.array(rgba, dtype=np.float32),
         )
         self.geom_idx += 1

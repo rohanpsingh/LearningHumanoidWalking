@@ -2,20 +2,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch import sqrt
-
 from rl.policies.base import Net
+
 
 class Actor(Net):
     def __init__(self):
-        super(Actor, self).__init__()
+        super().__init__()
 
     def forward(self):
         raise NotImplementedError
 
+
 class Linear_Actor(Actor):
     def __init__(self, state_dim, action_dim, hidden_size=32):
-        super(Linear_Actor, self).__init__()
+        super().__init__()
 
         self.l1 = nn.Linear(state_dim, hidden_size)
         self.l2 = nn.Linear(hidden_size, action_dim)
@@ -30,14 +30,15 @@ class Linear_Actor(Actor):
         a = self.l2(a)
         return a
 
+
 class FF_Actor(Actor):
     def __init__(self, state_dim, action_dim, layers=(256, 256), nonlinearity=F.relu):
-        super(FF_Actor, self).__init__()
+        super().__init__()
 
         self.actor_layers = nn.ModuleList()
         self.actor_layers += [nn.Linear(state_dim, layers[0])]
-        for i in range(len(layers)-1):
-            self.actor_layers += [nn.Linear(layers[i], layers[i+1])]
+        for i in range(len(layers) - 1):
+            self.actor_layers += [nn.Linear(layers[i], layers[i + 1])]
         self.network_out = nn.Linear(layers[-1], action_dim)
 
         self.action_dim = action_dim
@@ -47,7 +48,7 @@ class FF_Actor(Actor):
 
     def forward(self, state, deterministic=True):
         x = state
-        for idx, layer in enumerate(self.actor_layers):
+        for _idx, layer in enumerate(self.actor_layers):
             x = self.nonlinearity(layer(x))
 
         action = torch.tanh(self.network_out(x))
@@ -56,13 +57,13 @@ class FF_Actor(Actor):
 
 class LSTM_Actor(Actor):
     def __init__(self, state_dim, action_dim, layers=(128, 128), nonlinearity=torch.tanh):
-        super(LSTM_Actor, self).__init__()
+        super().__init__()
 
         self.actor_layers = nn.ModuleList()
         self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
-        for i in range(len(layers)-1):
-            self.actor_layers += [nn.LSTMCell(layers[i], layers[i+1])]
-        self.network_out = nn.Linear(layers[i-1], action_dim)
+        for i in range(len(layers) - 1):
+            self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
+        self.network_out = nn.Linear(layers[i - 1], action_dim)
 
         self.action_dim = action_dim
         self.init_hidden_state()
@@ -79,8 +80,8 @@ class LSTM_Actor(Actor):
         self.hidden, self.cells = data
 
     def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
 
     def forward(self, x, deterministic=True):
         dims = len(x.size())
@@ -88,7 +89,7 @@ class LSTM_Actor(Actor):
         if dims == 3:  # if we get a batch of trajectories
             self.init_hidden_state(batch_size=x.size(1))
             y = []
-            for t, x_t in enumerate(x):
+            for _t, x_t in enumerate(x):
                 for idx, layer in enumerate(self.actor_layers):
                     c, h = self.cells[idx], self.hidden[idx]
                     self.hidden[idx], self.cells[idx] = layer(x_t, (h, c))
@@ -114,14 +115,23 @@ class LSTM_Actor(Actor):
 
 
 class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conventions
-    def __init__(self, state_dim, action_dim, layers=(256, 256), nonlinearity=torch.nn.functional.relu,
-                 init_std=0.2, learn_std=False, bounded=False, normc_init=True):
-        super(Gaussian_FF_Actor, self).__init__()
+    def __init__(
+        self,
+        state_dim,
+        action_dim,
+        layers=(256, 256),
+        nonlinearity=torch.nn.functional.relu,
+        init_std=0.2,
+        learn_std=False,
+        bounded=False,
+        normc_init=True,
+    ):
+        super().__init__()
 
         self.actor_layers = nn.ModuleList()
         self.actor_layers += [nn.Linear(state_dim, layers[0])]
-        for i in range(len(layers)-1):
-            self.actor_layers += [nn.Linear(layers[i], layers[i+1])]
+        for i in range(len(layers) - 1):
+            self.actor_layers += [nn.Linear(layers[i], layers[i + 1])]
         self.means = nn.Linear(layers[-1], action_dim)
 
         self.learn_std = learn_std
@@ -154,15 +164,15 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
         state = (state - self.obs_mean) / self.obs_std
 
         x = state
-        for l in self.actor_layers:
-            x = self.nonlinearity(l(x))
+        for layer in self.actor_layers:
+            x = self.nonlinearity(layer(x))
         mean = self.means(x)
 
         if self.bounded:
             mean = torch.tanh(mean)
 
         sd = torch.zeros_like(mean)
-        if hasattr(self, 'stds'):
+        if hasattr(self, "stds"):
             sd = self.stds
         return mean, sd
 
@@ -182,15 +192,23 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
 
 
 class Gaussian_LSTM_Actor(Actor):
-    def __init__(self, state_dim, action_dim, layers=(128, 128), nonlinearity=F.tanh, normc_init=False,
-                 init_std=0.2, learn_std=False):
-        super(Gaussian_LSTM_Actor, self).__init__()
+    def __init__(
+        self,
+        state_dim,
+        action_dim,
+        layers=(128, 128),
+        nonlinearity=F.tanh,
+        normc_init=False,
+        init_std=0.2,
+        learn_std=False,
+    ):
+        super().__init__()
 
         self.actor_layers = nn.ModuleList()
         self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
-        for i in range(len(layers)-1):
-            self.actor_layers += [nn.LSTMCell(layers[i], layers[i+1])]
-        self.network_out = nn.Linear(layers[i-1], action_dim)
+        for i in range(len(layers) - 1):
+            self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
+        self.network_out = nn.Linear(layers[i - 1], action_dim)
 
         self.action_dim = action_dim
         self.state_dim = state_dim
@@ -220,9 +238,8 @@ class Gaussian_LSTM_Actor(Actor):
         x = state
         if dims == 3:  # if we get a batch of trajectories
             self.init_hidden_state(batch_size=x.size(1))
-            action = []
             y = []
-            for t, x_t in enumerate(x):
+            for _t, x_t in enumerate(x):
                 for idx, layer in enumerate(self.actor_layers):
                     c, h = self.cells[idx], self.hidden[idx]
                     self.hidden[idx], self.cells[idx] = layer(x_t, (h, c))
@@ -247,8 +264,8 @@ class Gaussian_LSTM_Actor(Actor):
         return mu, sd
 
     def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
 
     def forward(self, state, deterministic=True):
         mu, sd = self._get_dist_params(state)
@@ -264,12 +281,13 @@ class Gaussian_LSTM_Actor(Actor):
         mu, sd = self._get_dist_params(inputs)
         return torch.distributions.Normal(mu, sd)
 
+
 # Initialization scheme for gaussian mlp (from ppo paper)
 # NOTE: the fact that this has the same name as a parameter caused a NASTY bug
 # apparently "if <function_name>" evaluates to True in python...
 def normc_fn(m):
     classname = m.__class__.__name__
-    if classname.find('Linear') != -1:
+    if classname.find("Linear") != -1:
         m.weight.data.normal_(0, 1)
         m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
         if m.bias is not None:

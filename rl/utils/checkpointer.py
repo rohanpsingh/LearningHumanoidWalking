@@ -3,8 +3,8 @@
 Provides functionality to save and load model checkpoints,
 including tracking the best model based on a metric.
 """
+
 from pathlib import Path
-from typing import Dict, Optional, Union
 
 import numpy as np
 import torch
@@ -19,7 +19,7 @@ class ModelCheckpointer:
     during training.
     """
 
-    def __init__(self, save_dir: Union[str, Path]):
+    def __init__(self, save_dir: str | Path):
         """Initialize the checkpointer.
 
         Args:
@@ -36,7 +36,7 @@ class ModelCheckpointer:
 
     def save(
         self,
-        models: Dict[str, nn.Module],
+        models: dict[str, nn.Module],
         suffix: str = "",
     ) -> None:
         """Save model checkpoints.
@@ -53,7 +53,7 @@ class ModelCheckpointer:
 
     def save_if_best(
         self,
-        models: Dict[str, nn.Module],
+        models: dict[str, nn.Module],
         metric: float,
         step: int,
     ) -> bool:
@@ -98,7 +98,7 @@ class ModelCheckpointer:
         self,
         model_name: str,
         suffix: str = "",
-        map_location: Optional[str] = None,
+        map_location: str | None = None,
     ) -> nn.Module:
         """Load a model checkpoint.
 
@@ -135,5 +135,5 @@ class ModelCheckpointer:
             if stem == model_name:
                 suffixes.append("")
             else:
-                suffixes.append(stem[len(model_name):])
+                suffixes.append(stem[len(model_name) :])
         return sorted(suffixes)

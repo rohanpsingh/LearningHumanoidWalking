@@ -2,6 +2,7 @@
 
 Functions return scalar reward values, typically in range [0, 1] for exponential rewards.
 """
+
 import numpy as np
 
 
@@ -16,7 +17,7 @@ def calc_fwd_vel_reward(root_vel: float, goal_speed: float) -> float:
         Exponential reward based on velocity error.
     """
     error = np.abs(root_vel - goal_speed)
-    return np.exp(-10 * (error ** 2))
+    return np.exp(-10 * (error**2))
 
 
 def calc_yaw_vel_reward(yaw_vel: float, yaw_vel_ref: float = 0) -> float:
@@ -30,7 +31,7 @@ def calc_yaw_vel_reward(yaw_vel: float, yaw_vel_ref: float = 0) -> float:
         Exponential reward based on yaw velocity error.
     """
     error = np.abs(yaw_vel - yaw_vel_ref)
-    return np.exp(-10 * (error ** 3))
+    return np.exp(-10 * (error**3))
 
 
 def calc_action_reward(action: np.ndarray, prev_action: np.ndarray) -> float:
@@ -265,15 +266,23 @@ def create_phase_reward(swing_duration, stance_duration, strict_relaxer, stance_
     r_vel_prev_cycle = np.copy(r_vel_phase_points)
     l_frc_prev_cycle = np.copy(l_frc_phase_points)
     l_vel_prev_cycle = np.copy(l_vel_phase_points)
-    l_frc_prev_cycle[0] = r_frc_prev_cycle[0] = r_frc_phase_points[0] - r_frc_phase_points[0, -1] - dbl_stance_relax_offset
-    l_vel_prev_cycle[0] = r_vel_prev_cycle[0] = r_vel_phase_points[0] - r_vel_phase_points[0, -1] - dbl_stance_relax_offset
+    l_frc_prev_cycle[0] = r_frc_prev_cycle[0] = (
+        r_frc_phase_points[0] - r_frc_phase_points[0, -1] - dbl_stance_relax_offset
+    )
+    l_vel_prev_cycle[0] = r_vel_prev_cycle[0] = (
+        r_vel_phase_points[0] - r_vel_phase_points[0, -1] - dbl_stance_relax_offset
+    )
 
     r_frc_second_cycle = np.copy(r_frc_phase_points)
     r_vel_second_cycle = np.copy(r_vel_phase_points)
     l_frc_second_cycle = np.copy(l_frc_phase_points)
     l_vel_second_cycle = np.copy(l_vel_phase_points)
-    l_frc_second_cycle[0] = r_frc_second_cycle[0] = r_frc_phase_points[0] + r_frc_phase_points[0, -1] + dbl_stance_relax_offset
-    l_vel_second_cycle[0] = r_vel_second_cycle[0] = r_vel_phase_points[0] + r_vel_phase_points[0, -1] + dbl_stance_relax_offset
+    l_frc_second_cycle[0] = r_frc_second_cycle[0] = (
+        r_frc_phase_points[0] + r_frc_phase_points[0, -1] + dbl_stance_relax_offset
+    )
+    l_vel_second_cycle[0] = r_vel_second_cycle[0] = (
+        r_vel_phase_points[0] + r_vel_phase_points[0, -1] + dbl_stance_relax_offset
+    )
 
     r_frc_phase_points_repeated = np.hstack((r_frc_prev_cycle, r_frc_phase_points, r_frc_second_cycle))
     r_vel_phase_points_repeated = np.hstack((r_vel_prev_cycle, r_vel_phase_points, r_vel_second_cycle))

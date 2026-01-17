@@ -3,18 +3,20 @@
 These tests verify that training and evaluation are reproducible when
 using the same random seed.
 """
-import pytest
-import torch
-import numpy as np
+
 from copy import deepcopy
 
+import numpy as np
+import pytest
+import torch
 from conftest import get_env_info
+
 from rl.utils.seeding import set_global_seeds
 
 
 def get_single_env_name():
     """Get a single environment for determinism tests (faster than testing all)."""
-    return 'h1'
+    return "h1"
 
 
 @pytest.fixture
@@ -23,7 +25,7 @@ def determinism_train_args(temp_logdir):
     from argparse import Namespace
 
     return Namespace(
-        env='h1',
+        env="h1",
         logdir=temp_logdir,
         lr=1e-4,
         eps=1e-5,
@@ -49,7 +51,7 @@ def determinism_train_args(temp_logdir):
         yaml=None,
         input_norm_steps=50,
         n_itr=2,
-        device='cpu',
+        device="cpu",
     )
 
 
@@ -57,7 +59,7 @@ def compare_state_dicts(state1: dict, state2: dict) -> tuple[bool, list[str]]:
     """Compare two state dicts and return (match, differences)."""
     differences = []
 
-    for key in state1.keys():
+    for key in state1:
         if key not in state2:
             differences.append(f"Key {key} missing in second state dict")
             continue
@@ -79,15 +81,15 @@ class TestDeterministicTraining:
         """Test that two training runs with the same seed produce identical results."""
         from argparse import Namespace
 
-        env_info = get_env_info('h1')
-        env_factory = env_info['factory']
+        env_info = get_env_info("h1")
+        env_factory = env_info["factory"]
 
         seed = 12345
         n_itr = 2
 
         def create_args(logdir):
             return Namespace(
-                env='h1',
+                env="h1",
                 logdir=logdir,
                 lr=1e-4,
                 eps=1e-5,
@@ -113,12 +115,12 @@ class TestDeterministicTraining:
                 yaml=None,
                 input_norm_steps=50,
                 n_itr=n_itr,
-                device='cpu',
+                device="cpu",
             )
 
         # Run 1
+
         from rl.algos.ppo import PPO
-        import shutil
 
         run1_dir = temp_logdir / "run1"
         run1_dir.mkdir()
@@ -141,22 +143,21 @@ class TestDeterministicTraining:
         match, differences = compare_state_dicts(state1, state2)
 
         if not match:
-            pytest.fail(f"Training not deterministic. Differences:\n" +
-                       "\n".join(differences))
+            pytest.fail("Training not deterministic. Differences:\n" + "\n".join(differences))
 
     @pytest.mark.timeout(180)
     def test_different_seeds_produce_different_results(self, temp_logdir):
         """Test that different seeds produce different training results."""
         from argparse import Namespace
 
-        env_info = get_env_info('h1')
-        env_factory = env_info['factory']
+        env_info = get_env_info("h1")
+        env_factory = env_info["factory"]
 
         n_itr = 2
 
         def create_args(logdir):
             return Namespace(
-                env='h1',
+                env="h1",
                 logdir=logdir,
                 lr=1e-4,
                 eps=1e-5,
@@ -182,7 +183,7 @@ class TestDeterministicTraining:
                 yaml=None,
                 input_norm_steps=50,
                 n_itr=n_itr,
-                device='cpu',
+                device="cpu",
             )
 
         from rl.algos.ppo import PPO
@@ -219,15 +220,15 @@ class TestDeterministicEvaluation:
         """Test that policy evaluation is deterministic with the same seed."""
         from argparse import Namespace
 
-        env_info = get_env_info('h1')
-        env_factory = env_info['factory']
+        env_info = get_env_info("h1")
+        env_factory = env_info["factory"]
 
         # First train a model
         train_seed = 42
         n_itr = 1
 
         args = Namespace(
-            env='h1',
+            env="h1",
             logdir=temp_logdir,
             lr=1e-4,
             eps=1e-5,
@@ -253,7 +254,7 @@ class TestDeterministicEvaluation:
             yaml=None,
             input_norm_steps=50,
             n_itr=n_itr,
-            device='cpu',
+            device="cpu",
         )
 
         from rl.algos.ppo import PPO
@@ -304,27 +305,24 @@ class TestDeterministicEvaluation:
         states2, actions2, rewards2 = run_evaluation(eval_seed)
 
         # Compare trajectories
-        assert np.allclose(states1, states2), \
-            f"States differ: max_diff={np.abs(states1 - states2).max()}"
-        assert np.allclose(actions1, actions2), \
-            f"Actions differ: max_diff={np.abs(actions1 - actions2).max()}"
-        assert np.allclose(rewards1, rewards2), \
-            f"Rewards differ: max_diff={np.abs(rewards1 - rewards2).max()}"
+        assert np.allclose(states1, states2), f"States differ: max_diff={np.abs(states1 - states2).max()}"
+        assert np.allclose(actions1, actions2), f"Actions differ: max_diff={np.abs(actions1 - actions2).max()}"
+        assert np.allclose(rewards1, rewards2), f"Rewards differ: max_diff={np.abs(rewards1 - rewards2).max()}"
 
     @pytest.mark.timeout(120)
     def test_stochastic_vs_deterministic_actions(self, temp_logdir):
         """Test that stochastic actions differ while deterministic stay same."""
         from argparse import Namespace
 
-        env_info = get_env_info('h1')
-        env_factory = env_info['factory']
+        env_info = get_env_info("h1")
+        env_factory = env_info["factory"]
 
         # Train a model
         train_seed = 42
         n_itr = 1
 
         args = Namespace(
-            env='h1',
+            env="h1",
             logdir=temp_logdir,
             lr=1e-4,
             eps=1e-5,
@@ -350,7 +348,7 @@ class TestDeterministicEvaluation:
             yaml=None,
             input_norm_steps=50,
             n_itr=n_itr,
-            device='cpu',
+            device="cpu",
         )
 
         from rl.algos.ppo import PPO
@@ -371,8 +369,7 @@ class TestDeterministicEvaluation:
             det_action1 = policy(state, deterministic=True)
             det_action2 = policy(state, deterministic=True)
 
-        assert torch.allclose(det_action1, det_action2), \
-            "Deterministic actions should be identical"
+        assert torch.allclose(det_action1, det_action2), "Deterministic actions should be identical"
 
         # Stochastic actions should differ (with high probability)
         with torch.no_grad():
@@ -398,8 +395,7 @@ class TestSeedingUtilities:
         for offset in range(10):
             for worker_id in range(100):
                 seed = get_worker_seed(master_seed, worker_id, offset)
-                assert seed not in seeds, \
-                    f"Collision at offset={offset}, worker_id={worker_id}"
+                assert seed not in seeds, f"Collision at offset={offset}, worker_id={worker_id}"
                 seeds.add(seed)
 
     def test_set_global_seeds_affects_random(self):

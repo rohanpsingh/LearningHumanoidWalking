@@ -3,14 +3,15 @@
 This module provides common functionality shared across H1 environment
 implementations (standing, walking, etc.).
 """
+
 import os
 from abc import abstractmethod
 
 import numpy as np
 
-from robots.robot_base import RobotBase
-from envs.common.base_humanoid_env import BaseHumanoidEnv
 from envs.common import robot_interface
+from envs.common.base_humanoid_env import BaseHumanoidEnv
+from robots.robot_base import RobotBase
 from tasks import observations as obs_terms
 
 from .gen_xml import LEG_JOINTS
@@ -26,11 +27,11 @@ class H1BaseEnv(BaseHumanoidEnv):
     """
 
     # H1 body names
-    RFOOT_BODY = 'right_ankle_link'
-    LFOOT_BODY = 'left_ankle_link'
+    RFOOT_BODY = "right_ankle_link"
+    LFOOT_BODY = "left_ankle_link"
 
     def _get_default_config_path(self) -> str:
-        return os.path.join(os.path.dirname(os.path.realpath(__file__)), 'configs/base.yaml')
+        return os.path.join(os.path.dirname(os.path.realpath(__file__)), "configs/base.yaml")
 
     def _setup_robot(self) -> None:
         control_dt = self.cfg.control_dt
@@ -42,7 +43,7 @@ class H1BaseEnv(BaseHumanoidEnv):
         # PD gains from config
         self.leg_names = LEG_JOINTS
         gains_dict = self.cfg.pdgains.to_dict()
-        kp, kd = zip(*[gains_dict[jn] for jn in self.leg_names])
+        kp, kd = zip(*[gains_dict[jn] for jn in self.leg_names], strict=True)
         pdgains = np.array([kp, kd])
 
         # Get half-sitting pose from config
@@ -54,8 +55,7 @@ class H1BaseEnv(BaseHumanoidEnv):
         self.nominal_pose = base_position + base_orientation + list(self.half_sitting_pose)
 
         # Setup interface
-        self.interface = robot_interface.RobotInterface(
-            self.model, self.data, self.RFOOT_BODY, self.LFOOT_BODY, None)
+        self.interface = robot_interface.RobotInterface(self.model, self.data, self.RFOOT_BODY, self.LFOOT_BODY, None)
 
         # Setup task (implemented by subclasses)
         self._setup_task(control_dt)
@@ -100,21 +100,21 @@ class H1BaseEnv(BaseHumanoidEnv):
         motor_tau = obs_terms.get_motor_torques(self.interface)
 
         # Apply observation noise if enabled
-        if hasattr(self.cfg, 'observation_noise') and self.cfg.observation_noise.enabled:
+        if hasattr(self.cfg, "observation_noise") and self.cfg.observation_noise.enabled:
             observations = {
-                'root_orient': np.concatenate([root_r, root_p]),
-                'root_ang_vel': root_ang_vel,
-                'motor_pos': motor_pos,
-                'motor_vel': motor_vel,
-                'motor_tau': motor_tau,
+                "root_orient": np.concatenate([root_r, root_p]),
+                "root_ang_vel": root_ang_vel,
+                "motor_pos": motor_pos,
+                "motor_vel": motor_vel,
+                "motor_tau": motor_tau,
             }
             observations = self._apply_observation_noise(observations)
-            root_r = observations['root_orient'][:1]
-            root_p = observations['root_orient'][1:]
-            root_ang_vel = observations['root_ang_vel']
-            motor_pos = observations['motor_pos']
-            motor_vel = observations['motor_vel']
-            motor_tau = observations['motor_tau']
+            root_r = observations["root_orient"][:1]
+            root_p = observations["root_orient"][1:]
+            root_ang_vel = observations["root_ang_vel"]
+            motor_pos = observations["motor_pos"]
+            motor_vel = observations["motor_vel"]
+            motor_tau = observations["motor_tau"]
 
         return np.concatenate([root_r, root_p, root_ang_vel, motor_pos, motor_vel, motor_tau])
 

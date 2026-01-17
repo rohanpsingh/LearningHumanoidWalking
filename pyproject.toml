@@ -52,6 +52,7 @@ exclude = [
     ".tox",
     ".venv",
     "third_party",
+    "models",
 ]
 
 [tool.ruff.lint]
@@ -64,6 +65,11 @@ select = [
     "I",      # isort
     "TC004",  # type-checking block rules
     "TC005",  # type-checking block rules
+]
+ignore = [
+    "E731",   # lambda assignment
+    "SIM102", # nested if
+    "SIM108", # ternary operator
 ]
 
 [tool.ruff.lint.isort]

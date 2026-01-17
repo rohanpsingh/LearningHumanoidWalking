@@ -6,10 +6,11 @@ rewards, and termination conditions for training humanoid robots.
 All tasks inherit from TaskBase which defines the required interface
 for interaction with RobotBase and environment classes.
 """
+
 from tasks.base_task import BaseTask
-from tasks.walking_task import WalkingTask
-from tasks.stepping_task import SteppingTask
 from tasks.standing_task import StandingTask
+from tasks.stepping_task import SteppingTask
+from tasks.walking_task import WalkingTask
 
 __all__ = [
     "BaseTask",

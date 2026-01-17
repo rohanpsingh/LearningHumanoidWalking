@@ -3,17 +3,16 @@
 This module provides dynamic environment discovery and parametrized fixtures
 that automatically test all environments under envs/.
 """
-import pytest
-import sys
+
 import os
 import shutil
+import sys
 import tempfile
-from pathlib import Path
 from argparse import Namespace
 from functools import partial
+from pathlib import Path
 
-import numpy as np
-import torch
+import pytest
 import ray
 
 # Add project root to path
@@ -34,10 +33,10 @@ def discover_environments():
     for env_name, (env_class, robot_name) in ENVIRONMENTS.items():
         env_fn = partial(env_class, path_to_yaml=None)
         environments[env_name] = {
-            'class': env_class,
-            'factory': env_fn,
-            'name': env_class.__name__,
-            'robot': robot_name,
+            "class": env_class,
+            "factory": env_fn,
+            "name": env_class.__name__,
+            "robot": robot_name,
         }
 
     return environments
@@ -88,13 +87,13 @@ def env_info(env_name):
 @pytest.fixture
 def env_class(env_info):
     """Get the environment class."""
-    return env_info['class']
+    return env_info["class"]
 
 
 @pytest.fixture
 def env_factory(env_info):
     """Get the environment factory function."""
-    return env_info['factory']
+    return env_info["factory"]
 
 
 @pytest.fixture
@@ -109,24 +108,24 @@ def env_instance(env_factory):
 def train_args(temp_logdir, env_info):
     """Create training arguments for the current environment."""
     # Determine env string for run_experiment.py compatibility
-    robot = env_info['robot']
-    class_name = env_info['name']
+    robot = env_info["robot"]
+    class_name = env_info["name"]
 
     # Map to the env names used in run_experiment.py
-    if robot == 'h1':
-        env_str = 'h1'
-    elif robot == 'jvrc':
-        if 'Step' in class_name:
-            env_str = 'jvrc_step'
+    if robot == "h1":
+        env_str = "h1"
+    elif robot == "jvrc":
+        if "Step" in class_name:
+            env_str = "jvrc_step"
         else:
-            env_str = 'jvrc_walk'
+            env_str = "jvrc_walk"
     else:
         # For new environments, use robot name as fallback
         env_str = robot
 
     # Check if environment has mirror indices
-    test_env = env_info['factory']()
-    has_mirror = hasattr(test_env.robot, 'mirrored_obs') and hasattr(test_env.robot, 'mirrored_acts')
+    test_env = env_info["factory"]()
+    has_mirror = hasattr(test_env.robot, "mirrored_obs") and hasattr(test_env.robot, "mirrored_acts")
     test_env.close()
 
     return Namespace(
@@ -163,7 +162,7 @@ def get_all_env_instances():
     """Create instances of all discovered environments."""
     envs = []
     for env_name, info in DISCOVERED_ENVIRONMENTS.items():
-        env = info['factory']()
+        env = info["factory"]()
         envs.append((env_name, env))
     return envs
 

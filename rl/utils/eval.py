@@ -1,11 +1,10 @@
-import torch
 import time
+from datetime import datetime
 from pathlib import Path
 
-import mujoco
-
 import imageio
-from datetime import datetime
+import mujoco
+import torch
 
 
 class EvaluateEnv:
@@ -49,7 +48,9 @@ class EvaluateEnv:
             step_start = time.time()
 
             # forward pass and step
-            raw = self.policy.forward(torch.tensor(observation, dtype=torch.float32), deterministic=True).detach().numpy()
+            raw = (
+                self.policy.forward(torch.tensor(observation, dtype=torch.float32), deterministic=True).detach().numpy()
+            )
             observation, _, done, _ = self.env.step(raw.copy())
 
             # render scene for video recording
@@ -66,7 +67,8 @@ class EvaluateEnv:
                 reset_counter += 1
 
             time_until_next_step = max(
-                0, self.env.frame_skip * self.env.model.opt.timestep - (time.time() - step_start))
+                0, self.env.frame_skip * self.env.model.opt.timestep - (time.time() - step_start)
+            )
             time.sleep(time_until_next_step)
 
         for frame in frames:
