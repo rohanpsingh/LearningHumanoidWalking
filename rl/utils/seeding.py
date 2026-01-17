@@ -32,11 +32,9 @@ def set_global_seeds(seed: int, cuda_deterministic: bool = True) -> None:
 def get_worker_seed(master_seed: int, worker_id: int, offset: int = 0) -> int:
     """Derive deterministic worker-specific seed.
 
-    Uses multiplication to avoid collisions between different worker_id/offset
-    combinations. With this scheme:
-    - offset separates phases (0=training, 1=normalization, etc.)
-    - worker_id separates workers within a phase
-    - Supports up to 10000 workers per phase and 1000 phases
+    Uses a combination scheme that avoids collisions while staying within
+    numpy's seed range (0 to 2^32-1). The scheme uses modular arithmetic
+    to ensure valid seed values.
 
     Args:
         master_seed: The master seed from CLI
@@ -44,6 +42,10 @@ def get_worker_seed(master_seed: int, worker_id: int, offset: int = 0) -> int:
         offset: Phase offset (0=training workers, 1=normalization, etc.)
 
     Returns:
-        Deterministic seed for this worker
+        Deterministic seed for this worker (0 to 2^32-1)
     """
-    return master_seed * 1_000_000 + offset * 10_000 + worker_id
+    # Use a large prime multiplier to spread seeds and avoid collisions
+    # Keep result within numpy's valid seed range (2^32 - 1)
+    MAX_SEED = 2**32 - 1
+    combined = master_seed * 1_000_003 + offset * 10_007 + worker_id
+    return combined % MAX_SEED
