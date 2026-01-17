@@ -3,7 +3,6 @@
 This module defines a simple standing task where the robot must maintain
 an upright posture without walking.
 """
-from typing import Dict
 
 import numpy as np
 
@@ -52,7 +51,7 @@ class StandingTask(BaseTask):
         prev_torque: np.ndarray,
         prev_action: np.ndarray,
         action: np.ndarray,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate reward components for standing.
 
         Rewards the robot for:
@@ -71,7 +70,7 @@ class StandingTask(BaseTask):
         Returns:
             Dictionary of reward components.
         """
-        root_pose = self._client.get_object_affine_by_name("pelvis", 'OBJ_BODY')
+        root_pose = self._client.get_object_affine_by_name("pelvis", "OBJ_BODY")
 
         # height reward
         target_root_h = 0.98
@@ -80,7 +79,7 @@ class StandingTask(BaseTask):
 
         # upperbody reward
         head_pose_offset = np.zeros(2)
-        head_pose = self._client.get_object_affine_by_name("torso_link", 'OBJ_BODY')
+        head_pose = self._client.get_object_affine_by_name("torso_link", "OBJ_BODY")
         head_pos_in_robot_base = np.linalg.inv(root_pose).dot(head_pose)[:2, 3] - head_pose_offset
         upperbody_error = np.linalg.norm(head_pos_in_robot_base)
 
@@ -120,7 +119,7 @@ class StandingTask(BaseTask):
         """
         root_jnt_adr = self._client.model.body("pelvis").jntadr[0]
         root_qpos_adr = self._client.model.joint(root_jnt_adr).qposadr[0]
-        qpos = self._client.get_qpos()[root_qpos_adr:root_qpos_adr + 7]
+        qpos = self._client.get_qpos()[root_qpos_adr : root_qpos_adr + 7]
         contact_flag = self._client.check_self_collisions()
 
         terminate_conditions = {

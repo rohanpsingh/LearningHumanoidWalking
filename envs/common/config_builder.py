@@ -1,6 +1,8 @@
 import os
+from typing import Any
+
 import yaml
-from typing import Any, Dict, Optional, Union, List
+
 
 class Configuration:
     """A class to handle configuration data with attribute-style access."""
@@ -28,7 +30,7 @@ class Configuration:
         """Return None for non-existent attributes instead of raising an error."""
         return None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the Configuration object back to a dictionary."""
         result = {}
         for key, value in self.__dict__.items():
@@ -39,6 +41,7 @@ class Configuration:
             else:
                 result[key] = value
         return result
+
 
 def load_yaml(file_path: str) -> Configuration:
     """
@@ -57,9 +60,9 @@ def load_yaml(file_path: str) -> Configuration:
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Configuration file not found: {file_path}")
 
-    with open(file_path, 'r') as file:
+    with open(file_path) as file:
         try:
             config_data = yaml.safe_load(file)
         except yaml.YAMLError as e:
-            raise yaml.YAMLError(f"Error parsing YAML file {file_path}: {e}")
+            raise yaml.YAMLError(f"Error parsing YAML file {file_path}: {e}") from e
     return Configuration(**config_data)

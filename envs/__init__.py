@@ -4,8 +4,8 @@ All environment classes should be imported and registered here.
 This makes environments discoverable for testing and external use.
 """
 
-from envs.jvrc import JvrcWalkEnv, JvrcStepEnv
 from envs.h1 import H1Env
+from envs.jvrc import JvrcStepEnv, JvrcWalkEnv
 
 # Registry of all available environments
 # Maps environment name -> (class, robot_name)

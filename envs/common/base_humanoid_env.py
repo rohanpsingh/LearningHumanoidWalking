@@ -3,18 +3,17 @@
 This module provides common functionality shared across all humanoid
 environment implementations, reducing code duplication.
 """
-import os
-import copy
+
 import collections
+import copy
+import os
 from abc import abstractmethod
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import transforms3d as tf3
 
-from envs.common import mujoco_env, robot_interface, config_builder
+from envs.common import config_builder, mujoco_env
 from envs.common.domain_randomization import apply_perturbation, randomize_dynamics
-from robots.robot_base import RobotBase
 
 
 class BaseHumanoidEnv(mujoco_env.MujocoEnv):
@@ -36,7 +35,7 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
     - _get_external_state(): Return task-specific external state
     """
 
-    def __init__(self, path_to_yaml: Optional[str] = None):
+    def __init__(self, path_to_yaml: str | None = None):
         """Initialize the humanoid environment.
 
         Args:
@@ -79,15 +78,15 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
         control_dt = self.cfg.control_dt
 
         # Check for dynamics randomization config
-        dyn_cfg = getattr(self.cfg, 'dynamics_randomization', None)
-        if dyn_cfg is not None and getattr(dyn_cfg, 'enable', False):
+        dyn_cfg = getattr(self.cfg, "dynamics_randomization", None)
+        if dyn_cfg is not None and getattr(dyn_cfg, "enable", False):
             self.dynrand_interval = int(dyn_cfg.interval / control_dt)
         else:
             self.dynrand_interval = 0
 
         # Check for perturbation config
-        perturb_cfg = getattr(self.cfg, 'perturbation', None)
-        if perturb_cfg is not None and getattr(perturb_cfg, 'enable', False):
+        perturb_cfg = getattr(self.cfg, "perturbation", None)
+        if perturb_cfg is not None and getattr(perturb_cfg, "enable", False):
             self.perturb_interval = int(perturb_cfg.interval / control_dt)
         else:
             self.perturb_interval = 0
@@ -161,19 +160,19 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
         Returns:
             Path to export directory.
         """
-        if hasattr(self.cfg, 'xml_export_path') and self.cfg.xml_export_path:
+        if hasattr(self.cfg, "xml_export_path") and self.cfg.xml_export_path:
             base_path = self.cfg.xml_export_path
         else:
-            base_path = '/tmp/mjcf-export'
+            base_path = "/tmp/mjcf-export"
         return os.path.join(base_path, env_name)
 
-    def _get_joint_names(self) -> List[str]:
+    def _get_joint_names(self) -> list[str]:
         """Get list of actuated joint names.
 
         Returns:
             List of joint names (from actuators or leg_names attribute).
         """
-        return getattr(self, 'actuators', getattr(self, 'leg_names', []))
+        return getattr(self, "actuators", getattr(self, "leg_names", []))
 
     def get_obs(self) -> np.ndarray:
         """Get the current observation including history.
@@ -185,8 +184,9 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
         ext_state = self._get_external_state()
         state = np.concatenate([robot_state, ext_state])
 
-        assert state.shape == (self.base_obs_len,), \
+        assert state.shape == (self.base_obs_len,), (
             f"State vector length expected to be: {self.base_obs_len} but is {len(state)}"
+        )
 
         # Manage observation history
         if len(self.observation_history) == 0:
@@ -196,7 +196,7 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
 
         return np.array(self.observation_history).flatten()
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict]:
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, dict]:
         """Execute one environment step.
 
         Args:
@@ -206,8 +206,7 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
             Tuple of (observation, reward, done, info_dict).
         """
         # Apply action smoothing
-        targets = self._action_smoothing * action + \
-            (1 - self._action_smoothing) * self.prev_prediction
+        targets = self._action_smoothing * action + (1 - self._action_smoothing) * self.prev_prediction
 
         # Get offsets from nominal pose
         offsets = self._get_action_offsets()
@@ -230,29 +229,20 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
     def _randomize_dynamics(self) -> None:
         """Apply dynamics randomization."""
         joint_names = self._get_joint_names()
-        randomize_dynamics(
-            self.model,
-            self.default_model,
-            self.interface,
-            joint_names,
-            self.cfg.dynamics_randomization
-        )
+        randomize_dynamics(self.model, self.default_model, self.interface, joint_names, self.cfg.dynamics_randomization)
 
     def _apply_perturbation(self) -> None:
         """Apply perturbation forces."""
         apply_perturbation(self.data, self.cfg.perturbation)
 
-    def _get_action_offsets(self) -> List[float]:
+    def _get_action_offsets(self) -> list[float]:
         """Get action offsets from nominal pose.
 
         Returns:
             List of offset values for each actuator.
         """
         actuator_names = self._get_joint_names()
-        return [
-            self.nominal_pose[self.interface.get_jnt_qposadr_by_name(jnt)[0]]
-            for jnt in actuator_names
-        ]
+        return [self.nominal_pose[self.interface.get_jnt_qposadr_by_name(jnt)[0]] for jnt in actuator_names]
 
     def reset_model(self) -> np.ndarray:
         """Reset the environment to initial state.
@@ -268,7 +258,7 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
         init_qvel = [0] * self.interface.nv()
 
         # Apply initialization noise if configured
-        init_noise = getattr(self.cfg, 'init_noise', None)
+        init_noise = getattr(self.cfg, "init_noise", None)
         if init_noise is not None and init_noise > 0:
             init_qpos = self._apply_init_noise(init_qpos)
 
@@ -297,30 +287,24 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
         c = self.cfg.init_noise * np.pi / 180
         joint_names = self._get_joint_names()
 
-        root_adr = self.interface.get_jnt_qposadr_by_name('root')[0]
+        root_adr = self.interface.get_jnt_qposadr_by_name("root")[0]
 
         # Add noise to root height
-        init_qpos[root_adr + 2] = np.random.uniform(
-            init_qpos[root_adr + 2],
-            init_qpos[root_adr + 2] + 0.02
-        )
+        init_qpos[root_adr + 2] = np.random.uniform(init_qpos[root_adr + 2], init_qpos[root_adr + 2] + 0.02)
 
         # Add noise to root orientation
-        init_qpos[root_adr + 3:root_adr + 7] = tf3.euler.euler2quat(
-            np.random.uniform(-c, c),
-            np.random.uniform(-c, c),
-            0
+        init_qpos[root_adr + 3 : root_adr + 7] = tf3.euler.euler2quat(
+            np.random.uniform(-c, c), np.random.uniform(-c, c), 0
         )
 
         # Add noise to joint positions
-        init_qpos[root_adr + 7:root_adr + 7 + len(joint_names)] = [
-            init_qpos[root_adr + 7 + i] + np.random.uniform(-c, c)
-            for i in range(len(joint_names))
+        init_qpos[root_adr + 7 : root_adr + 7 + len(joint_names)] = [
+            init_qpos[root_adr + 7 + i] + np.random.uniform(-c, c) for i in range(len(joint_names))
         ]
 
         return init_qpos
 
-    def _apply_observation_noise(self, observations: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def _apply_observation_noise(self, observations: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Apply noise to observations based on config.
 
         Args:
@@ -329,7 +313,7 @@ class BaseHumanoidEnv(mujoco_env.MujocoEnv):
         Returns:
             Dictionary of noised observation arrays.
         """
-        if not hasattr(self.cfg, 'observation_noise') or not self.cfg.observation_noise.enabled:
+        if not hasattr(self.cfg, "observation_noise") or not self.cfg.observation_noise.enabled:
             return observations
 
         noise_cfg = self.cfg.observation_noise

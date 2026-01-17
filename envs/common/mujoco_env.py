@@ -1,16 +1,17 @@
 import contextlib
 import os
-import numpy as np
+
 import mujoco
 import mujoco.viewer
+import numpy as np
 
 from envs.common.marker_drawer import MarkerDrawer
 
 DEFAULT_SIZE = 500
 
-class MujocoEnv():
-    """Superclass for all MuJoCo environments.
-    """
+
+class MujocoEnv:
+    """Superclass for all MuJoCo environments."""
 
     def __init__(self, model_path, sim_dt, control_dt):
         if model_path.startswith("/"):
@@ -18,7 +19,7 @@ class MujocoEnv():
         else:
             raise Exception("Provide full path to robot description package.")
         if not os.path.exists(fullpath):
-            raise IOError("File %s does not exist" % fullpath)
+            raise OSError(f"File {fullpath} does not exist")
 
         self.spec = mujoco.MjSpec.from_file(fullpath)
         self.model = self.spec.compile()
@@ -28,7 +29,7 @@ class MujocoEnv():
         self._marker_drawer = None
 
         # set frame skip and sim dt
-        self.frame_skip = (control_dt/sim_dt)
+        self.frame_skip = control_dt / sim_dt
         self.model.opt.timestep = sim_dt
 
         self.init_qpos = self.data.qpos.ravel().copy()
@@ -72,42 +73,42 @@ class MujocoEnv():
 
     @contextlib.contextmanager
     def disable(self, *flags):
-      """Context manager for temporarily disabling MuJoCo flags.
+        """Context manager for temporarily disabling MuJoCo flags.
 
-      Args:
-        *flags: Positional arguments specifying flags to disable. Can be either
-          lowercase strings (e.g. 'gravity', 'contact') or `mjtDisableBit` enum
-          values.
+        Args:
+          *flags: Positional arguments specifying flags to disable. Can be either
+            lowercase strings (e.g. 'gravity', 'contact') or `mjtDisableBit` enum
+            values.
 
-      Yields:
-        None
+        Yields:
+          None
 
-      Raises:
-        ValueError: If any item in `flags` is neither a valid name nor a value
-          from `mujoco.mjtDisableBit`.
-      """
-      old_bitmask = self.model.opt.disableflags
-      new_bitmask = old_bitmask
-      for flag in flags:
-        if isinstance(flag, str):
-          try:
-            field_name = "mjDSBL_" + flag.upper()
-            flag = getattr(mujoco.mjtDisableBit, field_name)
-          except AttributeError:
-            valid_names = [
-                field_name.split("_")[1].lower()
-                for field_name in list(mujoco.mjtDisableBit.__members__)[:-1]
-            ]
-            raise ValueError("'{}' is not a valid flag name. Valid names: {}"
-                             .format(flag, ", ".join(valid_names))) from None
-        elif isinstance(flag, int):
-          flag = mujoco.mjtDisableBit(flag)
-        new_bitmask |= flag.value
-      self.model.opt.disableflags = new_bitmask
-      try:
-        yield
-      finally:
-        self.model.opt.disableflags = old_bitmask
+        Raises:
+          ValueError: If any item in `flags` is neither a valid name nor a value
+            from `mujoco.mjtDisableBit`.
+        """
+        old_bitmask = self.model.opt.disableflags
+        new_bitmask = old_bitmask
+        for flag in flags:
+            if isinstance(flag, str):
+                try:
+                    field_name = "mjDSBL_" + flag.upper()
+                    flag = getattr(mujoco.mjtDisableBit, field_name)
+                except AttributeError:
+                    valid_names = [
+                        field_name.split("_")[1].lower() for field_name in list(mujoco.mjtDisableBit.__members__)[:-1]
+                    ]
+                    raise ValueError(
+                        "'{}' is not a valid flag name. Valid names: {}".format(flag, ", ".join(valid_names))
+                    ) from None
+            elif isinstance(flag, int):
+                flag = mujoco.mjtDisableBit(flag)
+            new_bitmask |= flag.value
+        self.model.opt.disableflags = new_bitmask
+        try:
+            yield
+        finally:
+            self.model.opt.disableflags = old_bitmask
 
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
@@ -115,16 +116,14 @@ class MujocoEnv():
         return ob
 
     def set_state(self, qpos, qvel):
-        assert qpos.shape == (self.model.nq,), \
-            f"qpos shape {qpos.shape} is expected to be {(self.model.nq,)}"
-        assert qvel.shape == (self.model.nv,), \
-            f"qvel shape {qvel.shape} is expected to be {(self.model.nv,)}"
+        assert qpos.shape == (self.model.nq,), f"qpos shape {qpos.shape} is expected to be {(self.model.nq,)}"
+        assert qvel.shape == (self.model.nv,), f"qvel shape {qvel.shape} is expected to be {(self.model.nv,)}"
         self.data.qpos[:] = qpos
         self.data.qvel[:] = qvel
         self.data.act = []
         self.data.plugin_state = []
         # Disable actuation since we don't yet have meaningful control inputs.
-        with self.disable('actuation'):
+        with self.disable("actuation"):
             mujoco.mj_forward(self.model, self.data)
 
     @property
@@ -144,9 +143,7 @@ class MujocoEnv():
 
     def render(self):
         if self.viewer is None:
-            self.viewer = mujoco.viewer.launch_passive(
-                self.model, self.data, key_callback=self._key_callback
-            )
+            self.viewer = mujoco.viewer.launch_passive(self.model, self.data, key_callback=self._key_callback)
             self._marker_drawer = MarkerDrawer(self.viewer)
             self.viewer_setup()
 
@@ -215,18 +212,20 @@ class MujocoEnv():
             mujoco.mj_contactForce(self.model, self.data, i, c_array)
             force = np.linalg.norm(c_array)
 
-            contacts.append({
-                'geom1': geom1_name or f"geom{con.geom1}",
-                'geom2': geom2_name or f"geom{con.geom2}",
-                'dist': con.dist,
-                'force': force,
-                'pos': con.pos.copy()
-            })
+            contacts.append(
+                {
+                    "geom1": geom1_name or f"geom{con.geom1}",
+                    "geom2": geom2_name or f"geom{con.geom2}",
+                    "dist": con.dist,
+                    "force": force,
+                    "pos": con.pos.copy(),
+                }
+            )
         return {
-            'ncon': ncon,
-            'nconmax': nconmax,
-            'truncated': is_truncated,
-            'nefc': self.data.nefc,
-            'njmax': self.model.njmax,
-            'contacts': contacts
+            "ncon": ncon,
+            "nconmax": nconmax,
+            "truncated": is_truncated,
+            "nefc": self.data.nefc,
+            "njmax": self.model.njmax,
+            "contacts": contacts,
         }

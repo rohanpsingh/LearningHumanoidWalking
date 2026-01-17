@@ -3,13 +3,13 @@
 These tests are parametrized to run against ALL environments discovered
 under envs/. No hardcoded dimensions.
 """
-import pytest
-import numpy as np
-import torch
+
 import pickle
 from pathlib import Path
 
-from conftest import DISCOVERED_ENVIRONMENTS
+import numpy as np
+import pytest
+import torch
 
 
 class TestModelSaveLoad:
@@ -68,11 +68,11 @@ class TestModelSaveLoad:
         pkl_path = train_args.logdir / "experiment.pkl"
 
         # Save
-        with open(pkl_path, 'wb') as f:
+        with open(pkl_path, "wb") as f:
             pickle.dump(train_args, f)
 
         # Load
-        with open(pkl_path, 'rb') as f:
+        with open(pkl_path, "rb") as f:
             loaded_args = pickle.load(f)
 
         assert loaded_args.env == train_args.env
@@ -170,7 +170,7 @@ class TestFullEvaluationPipeline:
 
         # Save experiment args
         pkl_path = train_args.logdir / "experiment.pkl"
-        with open(pkl_path, 'wb') as f:
+        with open(pkl_path, "wb") as f:
             pickle.dump(train_args, f)
 
         # Load model and evaluate
@@ -209,8 +209,8 @@ class TestObservationNormalization:
         ppo = PPO(env_factory, train_args)
 
         # Policy should have normalization stats
-        assert hasattr(ppo.policy, 'obs_mean')
-        assert hasattr(ppo.policy, 'obs_std')
+        assert hasattr(ppo.policy, "obs_mean")
+        assert hasattr(ppo.policy, "obs_std")
 
         # Get obs dim from env
         env = env_factory()
@@ -233,8 +233,8 @@ class TestObservationNormalization:
         ppo = PPO(env_factory, train_args)
 
         # Critic should have normalization stats
-        assert hasattr(ppo.critic, 'obs_mean')
-        assert hasattr(ppo.critic, 'obs_std')
+        assert hasattr(ppo.critic, "obs_mean")
+        assert hasattr(ppo.critic, "obs_std")
 
         # Get obs dim from env
         env = env_factory()
@@ -256,8 +256,9 @@ class TestContinuedTraining:
     @pytest.mark.timeout(240)
     def test_continued_training(self, env_factory, train_args, env_name, temp_logdir):
         """Test continuing training from saved weights for any environment."""
-        from rl.algos.ppo import PPO
         from argparse import Namespace
+
+        from rl.algos.ppo import PPO
 
         # First training run
         train_args.n_itr = 1

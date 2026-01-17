@@ -2,8 +2,8 @@
 
 Provides a unified interface for logging training metrics to TensorBoard.
 """
+
 from pathlib import Path
-from typing import Dict, Union
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -15,7 +15,7 @@ class TrainingLogger:
     a reusable, testable logging interface.
     """
 
-    def __init__(self, log_dir: Union[str, Path], flush_secs: int = 10):
+    def __init__(self, log_dir: str | Path, flush_secs: int = 10):
         """Initialize the training logger.
 
         Args:
@@ -35,7 +35,7 @@ class TrainingLogger:
         """
         self._writer.add_scalar(tag, value, step)
 
-    def log_scalars(self, main_tag: str, values: Dict[str, float], step: int) -> None:
+    def log_scalars(self, main_tag: str, values: dict[str, float], step: int) -> None:
         """Log multiple related scalars.
 
         Args:

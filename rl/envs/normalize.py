@@ -1,13 +1,15 @@
 # Modified from https://github.com/openai/baselines/blob/master/baselines/common/vec_env/vec_normalize.py
 # Thanks to the authors + OpenAI for the code
 
+
 import numpy as np
-import functools
-import torch
 import ray
+import torch
+
+from rl.utils.seeding import get_worker_seed, set_global_seeds
 
 from .wrappers import WrapEnv
-from rl.utils.seeding import set_global_seeds, get_worker_seed
+
 
 @ray.remote
 def _run_random_actions(iter, policy, env_fn, noise_std, seed=None):
@@ -46,13 +48,17 @@ def _run_random_actions(iter, policy, env_fn, noise_std, seed=None):
 
     return states
 
+
 def get_normalization_params(iter, policy, env_fn, noise_std, procs=4, seed=None):
-    print("Gathering input normalization data using {0} steps, noise = {1}...".format(iter, noise_std))
+    print(f"Gathering input normalization data using {iter} steps, noise = {noise_std}...")
 
     states_ids = [
         _run_random_actions.remote(
-            iter // procs, policy, env_fn, noise_std,
-            seed=get_worker_seed(seed, i, offset=1) if seed is not None else None
+            iter // procs,
+            policy,
+            env_fn,
+            noise_std,
+            seed=get_worker_seed(seed, i, offset=1) if seed is not None else None,
         )
         for i in range(procs)
     ]
@@ -71,7 +77,6 @@ def get_normalization_params(iter, policy, env_fn, noise_std, procs=4, seed=None
 # returns a function that creates a normalized environment, then pre-normalizes it
 # using states sampled from a deterministic policy with some added noise
 def PreNormalizer(iter, noise_std, policy, *args, **kwargs):
-
     # noise is gaussian noise
     @torch.no_grad()
     def pre_normalize(env, policy, num_iter, noise_std):
@@ -81,7 +86,7 @@ def PreNormalizer(iter, noise_std, policy, *args, **kwargs):
 
         state = env.reset()
 
-        for t in range(num_iter):
+        for _t in range(num_iter):
             state = torch.Tensor(state)
 
             _, action = policy(state)
@@ -99,13 +104,14 @@ def PreNormalizer(iter, noise_std, policy, *args, **kwargs):
     def _Normalizer(venv):
         venv = Normalize(venv, *args, **kwargs)
 
-        print("Gathering input normalization data using {0} steps, noise = {1}...".format(iter, noise_std))
+        print(f"Gathering input normalization data using {iter} steps, noise = {noise_std}...")
         pre_normalize(venv, policy, iter, noise_std)
         print("Done gathering input normalization data.")
 
         return venv
 
     return _Normalizer
+
 
 # returns a function that creates a normalized environment
 def Normalizer(*args, **kwargs):
@@ -114,21 +120,15 @@ def Normalizer(*args, **kwargs):
 
     return _Normalizer
 
+
 class Normalize:
     """
     Vectorized environment base class
     """
-    def __init__(self,
-                 venv,
-                 ob_rms=None,
-                 ob=True,
-                 ret=False,
-                 clipob=10.,
-                 cliprew=10.,
-                 online=True,
-                 gamma=1.0,
-                 epsilon=1e-8):
 
+    def __init__(
+        self, venv, ob_rms=None, ob=True, ret=False, clipob=10.0, cliprew=10.0, online=True, gamma=1.0, epsilon=1e-8
+    ):
         self.venv = venv
         self._observation_space = venv.observation_space
         self._action_space = venv.action_space
@@ -150,7 +150,7 @@ class Normalize:
     def step(self, vac):
         obs, rews, news, infos = self.venv.step(vac)
 
-        #self.ret = self.ret * self.gamma + rews
+        # self.ret = self.ret * self.gamma + rews
         obs = self._obfilt(obs)
 
         # NOTE: shifting mean of reward seems bad; qualitatively changes MDP
@@ -198,14 +198,12 @@ class Normalize:
         return self.venv.num_envs
 
 
-
-class RunningMeanStd(object):
+class RunningMeanStd:
     # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
     def __init__(self, epsilon=1e-4, shape=()):
-        self.mean = np.zeros(shape, 'float64')
-        self.var = np.zeros(shape, 'float64')
+        self.mean = np.zeros(shape, "float64")
+        self.var = np.zeros(shape, "float64")
         self.count = epsilon
-
 
     def update(self, x):
         batch_mean = np.mean(x, axis=0)
@@ -227,12 +225,12 @@ class RunningMeanStd(object):
         self.var = new_var
         self.count = new_count
 
-def test_runningmeanstd():
-    for (x1, x2, x3) in [
-        (np.random.randn(3), np.random.randn(4), np.random.randn(5)),
-        (np.random.randn(3,2), np.random.randn(4,2), np.random.randn(5,2)),
-        ]:
 
+def test_runningmeanstd():
+    for x1, x2, x3 in [
+        (np.random.randn(3), np.random.randn(4), np.random.randn(5)),
+        (np.random.randn(3, 2), np.random.randn(4, 2), np.random.randn(5, 2)),
+    ]:
         rms = RunningMeanStd(epsilon=0.0, shape=x1.shape[1:])
 
         x = np.concatenate([x1, x2, x3], axis=0)

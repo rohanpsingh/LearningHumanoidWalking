@@ -4,9 +4,11 @@ This module implements a RolloutWorker that maintains a persistent environment
 instance across training iterations, avoiding the expensive environment
 recreation that occurs with stateless Ray remote functions.
 """
-import torch
-import ray
+
 from copy import deepcopy
+
+import ray
+import torch
 
 from rl.storage.rollout_storage import PPOBuffer
 from rl.utils.seeding import set_global_seeds
@@ -85,7 +87,7 @@ class RolloutWorker:
         critic = self.critic
         env = self.env
 
-        memory = PPOBuffer(self.state_dim, self.action_dim, gamma, lam, size=max_traj_len*2)
+        memory = PPOBuffer(self.state_dim, self.action_dim, gamma, lam, size=max_traj_len * 2)
         memory_full = False
 
         while not memory_full:
@@ -93,10 +95,10 @@ class RolloutWorker:
             done = False
             traj_len = 0
 
-            if hasattr(policy, 'init_hidden_state'):
+            if hasattr(policy, "init_hidden_state"):
                 policy.init_hidden_state()
 
-            if hasattr(critic, 'init_hidden_state'):
+            if hasattr(critic, "init_hidden_state"):
                 critic.init_hidden_state()
 
             while not done and traj_len < max_traj_len:
@@ -107,7 +109,7 @@ class RolloutWorker:
 
                 reward = torch.as_tensor(reward, dtype=torch.float)
                 memory.store(state, action, reward, value, done)
-                memory_full = (len(memory) >= max_steps)
+                memory_full = len(memory) >= max_steps
 
                 state = torch.as_tensor(next_state, dtype=torch.float)
                 traj_len += 1
@@ -120,6 +122,6 @@ class RolloutWorker:
     def get_env_info(self):
         """Return environment observation/action space info."""
         return {
-            'obs_dim': self.env.observation_space.shape[0],
-            'action_dim': self.env.action_space.shape[0],
+            "obs_dim": self.env.observation_space.shape[0],
+            "action_dim": self.env.action_space.shape[0],
         }
