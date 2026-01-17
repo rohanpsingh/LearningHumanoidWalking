@@ -25,8 +25,10 @@ packages = ["rl", "envs", "tasks", "robots"]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.0.0",
     "pytest>=8.0.0",
     "pytest-timeout>=2.3.0",
+    "ruff>=0.8.0",
 ]
 
 [tool.pytest.ini_options]
@@ -40,3 +42,29 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
+
+[tool.ruff]
+line-length = 120
+exclude = [
+    ".git",
+    ".idea",
+    ".mypy_cache",
+    ".tox",
+    ".venv",
+    "third_party",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle
+    "F",      # Pyflakes
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "I",      # isort
+    "TC004",  # type-checking block rules
+    "TC005",  # type-checking block rules
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rl", "envs", "tasks", "robots"]
