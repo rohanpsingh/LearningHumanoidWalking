@@ -65,9 +65,9 @@ class PPOBuffer:
         Returns:
             dict: Collected trajectory data
         """
-        ep_lens = [j - i for i, j in zip(self.traj_idx, self.traj_idx[1:], strict=True)]
+        ep_lens = [j - i for i, j in zip(self.traj_idx, self.traj_idx[1:], strict=False)]
         ep_rewards = [
-            float(sum(self.rewards[int(i) : int(j)])) for i, j in zip(self.traj_idx, self.traj_idx[1:], strict=True)
+            float(sum(self.rewards[int(i) : int(j)])) for i, j in zip(self.traj_idx, self.traj_idx[1:], strict=False)
         ]
         data = {
             "states": self.states[: self.ptr],

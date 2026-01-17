@@ -154,6 +154,7 @@ def train_args(temp_logdir, env_info):
         imitate_coeff=0.0,
         yaml=None,
         input_norm_steps=100,
+        device="cpu",  # Force CPU for tests to avoid Ray serialization issues with CUDA tensors
     )
 
 
