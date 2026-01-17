@@ -36,6 +36,7 @@ def print_system_info(args, training=True):
         print(f"Environment: {args.env}")
         print(f"Log directory: {args.logdir}")
         print(f"Num processes: {args.num_procs}")
+        print(f"Num envs / worker: {args.num_envs_per_worker}")
         print(f"Learning rate: {args.lr}")
         print(f"Max trajectory length: {args.max_traj_len}")
         print(f"Iterations: {args.n_itr}")
@@ -148,6 +149,9 @@ if __name__ == "__main__":
             help="Whether or not to calculate returns using Generalized Advantage Estimation",
         )
         parser.add_argument("--num-procs", type=int, default=12, help="Number of threads to train on")
+        parser.add_argument(
+            "--num-envs-per-worker", type=int, default=1, help="Envs per worker for vectorization (1=none)"
+        )
         parser.add_argument("--max-grad-norm", type=float, default=0.05, help="Value to clip gradients at")
         parser.add_argument("--max-traj-len", type=int, default=400, help="Max episode horizon")
         parser.add_argument("--no-mirror", required=False, action="store_true", help="to use SymmetricEnv")

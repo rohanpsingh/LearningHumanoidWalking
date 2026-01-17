@@ -42,8 +42,11 @@ class PPO:
         self.eval_freq = args.eval_freq
         self.recurrent = args.recurrent
         self.imitate_coeff = args.imitate_coeff
+        self.num_envs_per_worker = getattr(args, "num_envs_per_worker", 1)
 
         # batch_size depends on number of parallel envs
+        # Total parallel envs = n_proc when num_envs_per_worker=1 (backward compatible)
+        # With vectorization: total parallel envs = num_workers * num_envs_per_worker = n_proc
         self.batch_size = self.n_proc * self.max_traj_len
 
         self.total_steps = 0
@@ -143,7 +146,20 @@ class PPO:
         # Each worker creates its environment ONCE and reuses it across all iterations,
         # avoiding expensive MuJoCo model recompilation.
         # Workers always use CPU (they do single-sample inference, no batching benefit)
-        print(f"Creating {self.n_proc} persistent rollout workers...")
+
+        # Calculate number of workers based on vectorization
+        # n_proc represents total parallel environments
+        # If num_envs_per_worker > 1, we use fewer workers with more envs each
+        if self.num_envs_per_worker > 1:
+            self.num_workers = max(1, self.n_proc // self.num_envs_per_worker)
+            print(
+                f"Creating {self.num_workers} persistent rollout workers, "
+                f"each with {self.num_envs_per_worker} vectorized environments "
+                f"(total {self.num_workers * self.num_envs_per_worker} parallel envs)..."
+            )
+        else:
+            self.num_workers = self.n_proc
+            print(f"Creating {self.num_workers} persistent rollout workers...")
 
         # Create CPU copies for workers (deepcopy to avoid reference issues)
         if self.device.type == "cuda":
@@ -164,7 +180,11 @@ class PPO:
 
         self.workers = [
             RolloutWorker.remote(
-                env_fn, policy_cpu, critic_cpu, seed=get_worker_seed(self.seed, i) if self.seed is not None else None
+                env_fn,
+                policy_cpu,
+                critic_cpu,
+                self.num_envs_per_worker,
+                seed=get_worker_seed(self.seed, i) if self.seed is not None else None,
             )
             for i in range(self.n_proc)
         ]
@@ -219,8 +239,16 @@ class PPO:
 
         This method uses pre-created Ray actors that maintain persistent environments,
         avoiding the expensive environment recreation that happens with stateless tasks.
+
+        With vectorized environments, each worker manages multiple environments and
+        collects samples from all of them in parallel using batched policy inference.
         """
-        max_steps = self.batch_size // self.n_proc
+        # Calculate max_steps per worker
+        # batch_size = n_proc * max_traj_len (total samples we want across all workers)
+        # Each worker should collect: batch_size / num_workers samples
+        # This is true regardless of num_envs_per_worker (vectorization just changes
+        # how each worker collects its samples, not how many it should collect)
+        max_steps = self.batch_size // self.num_workers
 
         # Get state dicts and move to CPU for workers
         # (Workers always run on CPU, even if main process is on GPU)
