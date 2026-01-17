@@ -1,0 +1,13 @@
+#!/bin/bash
+
+staged_py_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+if [ -n "$staged_py_files" ]; then
+    echo "Running ruff..."
+    if command -v uv &>/dev/null; then
+        uv run ruff check $staged_py_files || exit 1
+        uv run ruff format --check $staged_py_files || exit 1
+    elif command -v ruff &>/dev/null; then
+        ruff check $staged_py_files || exit 1
+        ruff format --check $staged_py_files || exit 1
+    fi
+fi
