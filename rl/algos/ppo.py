@@ -19,10 +19,12 @@ from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
 from rl.envs.normalize import get_normalization_params
 from rl.utils import TrainingLogger, ModelCheckpointer
+from rl.utils.seeding import get_worker_seed
 from rl.workers import RolloutWorker
 
 class PPO:
-    def __init__(self, env_fn, args):
+    def __init__(self, env_fn, args, seed=None):
+        self.seed = seed
         self.gamma          = args.gamma
         self.lam            = args.lam
         self.lr             = args.lr
@@ -87,7 +89,8 @@ class PPO:
                                                              noise_std=1,
                                                              policy=policy,
                                                              env_fn=env_fn,
-                                                             procs=args.num_procs)
+                                                             procs=args.num_procs,
+                                                             seed=self.seed)
             with torch.no_grad():
                 policy.obs_mean, policy.obs_std = map(torch.Tensor, (obs_mean, obs_std))
                 critic.obs_mean = policy.obs_mean
@@ -157,8 +160,11 @@ class PPO:
             critic_cpu = self.critic
 
         self.workers = [
-            RolloutWorker.remote(env_fn, policy_cpu, critic_cpu)
-            for _ in range(self.n_proc)
+            RolloutWorker.remote(
+                env_fn, policy_cpu, critic_cpu,
+                seed=get_worker_seed(self.seed, i) if self.seed is not None else None
+            )
+            for i in range(self.n_proc)
         ]
         print("Workers created successfully.")
 
@@ -449,11 +455,18 @@ class PPO:
             imitation_losses = []
             clip_fractions = []
             for epoch in range(self.epochs):
+                # Create seeded generator for deterministic batch sampling
+                if self.seed is not None:
+                    g = torch.Generator()
+                    g.manual_seed(self.seed + itr * self.epochs + epoch)
+                else:
+                    g = None
+
                 if self.recurrent:
-                    random_indices = SubsetRandomSampler(range(len(batch.traj_idx)-1))
+                    random_indices = SubsetRandomSampler(range(len(batch.traj_idx)-1), generator=g)
                     sampler = BatchSampler(random_indices, minibatch_size, drop_last=False)
                 else:
-                    random_indices = SubsetRandomSampler(range(num_samples))
+                    random_indices = SubsetRandomSampler(range(num_samples), generator=g)
                     sampler = BatchSampler(random_indices, minibatch_size, drop_last=True)
 
                 for indices in sampler:
