@@ -144,6 +144,9 @@ if __name__ == "__main__":
         parser.add_argument("--imitate", required=False, type=str, default=None, help="Policy to imitate")
         parser.add_argument("--imitate-coeff", required=False, type=float, default=0.3, help="Coefficient for imitation loss")
         parser.add_argument("--yaml", required=False, type=str, default=None, help="Path to config file passed to Env class")
+        parser.add_argument("--device", required=False, type=str, default="auto",
+                            choices=["auto", "cpu", "cuda"],
+                            help="Device for training: 'auto' (use GPU if available), 'cpu', or 'cuda'")
         args = parser.parse_args()
 
         run_experiment(args)

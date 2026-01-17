@@ -30,11 +30,30 @@ class PPOBuffer:
     def finish_path(self, last_val=None):
         self.traj_idx += [self.ptr]
         rewards = self.rewards[self.traj_idx[-2]:self.traj_idx[-1], 0]
-        R = last_val.squeeze(0)
-        returns = torch.zeros_like(rewards)
-        for i in range(len(rewards) - 1, -1, -1):
-            R = self.gamma * R + rewards[i]
-            returns[i] = R
+        T = len(rewards)
+
+        if T == 0:
+            self.dones[-1] = True
+            return
+
+        # Vectorized discounted returns computation
+        # Append last_val to rewards for unified computation
+        last_val_scalar = last_val.squeeze(0) if last_val.dim() > 0 else last_val
+        extended_rewards = torch.cat([rewards, last_val_scalar.unsqueeze(0)])
+
+        # Compute discount powers: [1, γ, γ², ..., γ^T]
+        discount_powers = self.gamma ** torch.arange(T + 1, dtype=rewards.dtype, device=rewards.device)
+
+        # Weight rewards by discount powers
+        weighted = extended_rewards * discount_powers
+
+        # Reverse cumsum: at position i, gives sum_{j=i}^{T} γ^j * r_j
+        rev_cumsum = weighted.flip(0).cumsum(0).flip(0)
+
+        # Divide by position discount to get actual returns
+        # returns[i] = sum_{j=i}^{T} γ^(j-i) * r_j
+        returns = rev_cumsum[:-1] / discount_powers[:-1]
+
         self.returns[self.traj_idx[-2]:self.traj_idx[-1], 0] = returns
         self.dones[-1] = True
 
