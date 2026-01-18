@@ -17,7 +17,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from rl.envs.normalize import RunningMeanStd
 from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
-from rl.storage.rollout_storage import PPOBuffer
+from rl.storage.rollout_storage import BatchData
 from rl.utils import ModelCheckpointer, TrainingLogger
 from rl.utils.seeding import get_worker_seed
 from rl.workers import RolloutWorker
@@ -27,7 +27,6 @@ class PPO:
     def __init__(self, env_fn, args, seed=None):
         self.seed = seed
         self.gamma = args.gamma
-        self.lam = args.lam
         self.lr = args.lr
         self.eps = args.eps
         self.ent_coeff = args.entropy_coeff
@@ -35,7 +34,6 @@ class PPO:
         self.minibatch_size = args.minibatch_size
         self.epochs = args.epochs
         self.max_traj_len = args.max_traj_len
-        self.use_gae = args.use_gae
         self.n_proc = args.num_procs
         self.grad_clip = args.max_grad_norm
         self.mirror_coeff = args.mirror_coeff
@@ -168,55 +166,34 @@ class PPO:
 
         self.workers = [
             RolloutWorker.remote(
-                env_fn, policy_cpu, critic_cpu, seed=get_worker_seed(self.seed, i) if self.seed is not None else None
+                env_fn,
+                policy_cpu,
+                critic_cpu,
+                seed=get_worker_seed(self.seed, i) if self.seed is not None else None,
+                worker_id=i,
             )
             for i in range(self.n_proc)
         ]
         print("Workers created successfully.")
 
-    @ray.remote
-    @torch.no_grad()
-    @staticmethod
-    def sample(env_fn, policy, critic, gamma, lam, iteration_count, max_steps, max_traj_len, deterministic):
+    def _sync_obs_normalization(self, obs_mean, obs_std, include_old_policy=True):
+        """Sync observation normalization params to all networks.
+
+        This is the single point of truth for updating normalization parameters,
+        avoiding scattered manual synchronization throughout the codebase.
+
+        Args:
+            obs_mean: Observation mean tensor
+            obs_std: Observation std tensor
+            include_old_policy: Whether to also sync to old_policy (for PPO ratio)
         """
-        Sample max_steps number of total timesteps, truncating
-        trajectories if they exceed max_traj_len number of timesteps.
-        """
-        env = env_fn()
-        env.robot.iteration_count = iteration_count
-
-        memory = PPOBuffer(policy.state_dim, policy.action_dim, gamma, lam, size=max_traj_len * 2)
-        memory_full = False
-
-        while not memory_full:
-            state = torch.as_tensor(env.reset(), dtype=torch.float)
-            done = False
-            traj_len = 0
-
-            if hasattr(policy, "init_hidden_state"):
-                policy.init_hidden_state()
-
-            if hasattr(critic, "init_hidden_state"):
-                critic.init_hidden_state()
-
-            while not done and traj_len < max_traj_len:
-                action = policy(state, deterministic=deterministic)
-                value = critic(state)
-
-                # .numpy() is sufficient - env.step doesn't modify action in-place
-                next_state, reward, done, _ = env.step(action.numpy())
-
-                reward = torch.as_tensor(reward, dtype=torch.float)
-                memory.store(state, action, reward, value, done)
-                memory_full = len(memory) >= max_steps
-
-                state = torch.as_tensor(next_state, dtype=torch.float)
-                traj_len += 1
-
-            value = critic(state)
-            memory.finish_path(last_val=(not done) * value)
-
-        return memory.get_data()
+        self.policy.obs_mean = obs_mean
+        self.policy.obs_std = obs_std
+        self.critic.obs_mean = obs_mean
+        self.critic.obs_std = obs_std
+        if include_old_policy:
+            self.old_policy.obs_mean = obs_mean.clone()
+            self.old_policy.obs_std = obs_std.clone()
 
     def sample_parallel_with_workers(self, deterministic=False):
         """Sample trajectories using persistent worker actors.
@@ -226,59 +203,54 @@ class PPO:
         """
         max_steps = self.batch_size // self.n_proc
 
-        # Get state dicts and move to CPU for workers
+        # Get state dicts and obs normalization, move to CPU for workers
         # (Workers always run on CPU, even if main process is on GPU)
         policy_state_dict = {k: v.cpu() for k, v in self.policy.state_dict().items()}
         critic_state_dict = {k: v.cpu() for k, v in self.critic.state_dict().items()}
-
-        # Update all workers' weights in parallel
-        weight_futures = [w.set_weights.remote(policy_state_dict, critic_state_dict) for w in self.workers]
-        ray.get(weight_futures)  # Wait for all weights to be updated
-
-        # Sync obs normalization params (not included in state_dict as they're plain tensors)
         obs_mean_cpu = self.policy.obs_mean.cpu()
         obs_std_cpu = self.policy.obs_std.cpu()
-        norm_futures = [w.set_obs_normalization.remote(obs_mean_cpu, obs_std_cpu) for w in self.workers]
-        ray.get(norm_futures)
 
-        # Update iteration count on all workers
-        iter_futures = [w.set_iteration_count.remote(self.iteration_count) for w in self.workers]
-        ray.get(iter_futures)
+        # Use ray.put() to store in object store once, avoiding redundant
+        # serialization when broadcasting to multiple workers
+        policy_ref = ray.put(policy_state_dict)
+        critic_ref = ray.put(critic_state_dict)
+        obs_mean_ref = ray.put(obs_mean_cpu)
+        obs_std_ref = ray.put(obs_std_cpu)
+
+        # Sync all state to workers in a single call (weights, normalization, iteration)
+        sync_futures = [
+            w.sync_state.remote(policy_ref, critic_ref, obs_mean_ref, obs_std_ref, self.iteration_count)
+            for w in self.workers
+        ]
+        ray.get(sync_futures)
 
         # Collect samples from all workers in parallel
         sample_futures = [
-            w.sample.remote(self.gamma, self.lam, max_steps, self.max_traj_len, deterministic) for w in self.workers
+            w.sample.remote(self.gamma, max_steps, self.max_traj_len, deterministic) for w in self.workers
         ]
         result = ray.get(sample_futures)
 
         return self._aggregate_results(result)
 
-    def sample_parallel(self, *args, deterministic=False):
-        """Legacy sample_parallel for backward compatibility (e.g., evaluation).
+    def _aggregate_results(self, result: list[BatchData]) -> BatchData:
+        """Aggregate results from multiple workers into a single BatchData.
 
-        This uses stateless Ray tasks which recreate environments each time.
-        For training, use sample_parallel_with_workers() instead.
+        Args:
+            result: List of BatchData from worker sample() calls
+
+        Returns:
+            BatchData with concatenated tensors from all workers
         """
-        max_steps = self.batch_size // self.n_proc
-        worker_args = (self.gamma, self.lam, self.iteration_count, max_steps, self.max_traj_len, deterministic)
-        args = args + worker_args
-
-        # Create pool of workers, each getting data for min_steps
-        worker = self.sample
-        workers = [worker.remote(*args) for _ in range(self.n_proc)]
-        result = ray.get(workers)
-
-        return self._aggregate_results(result)
-
-    def _aggregate_results(self, result):
-        # Aggregate results - handle traj_idx specially for recurrent policies
+        # Aggregate trajectory data - handle traj_idx specially for recurrent policies
         # (indices need to be offset to reference correct positions in concatenated data)
-        data_keys = ["states", "actions", "rewards", "values", "returns", "dones"]
-        aggregated_data = {k: torch.cat([r[k] for r in result]) for k in data_keys}
-
-        # Concatenate scalar metrics directly
-        aggregated_data["ep_lens"] = torch.cat([r["ep_lens"] for r in result])
-        aggregated_data["ep_rewards"] = torch.cat([r["ep_rewards"] for r in result])
+        states = torch.cat([r.states for r in result])
+        actions = torch.cat([r.actions for r in result])
+        rewards = torch.cat([r.rewards for r in result])
+        values = torch.cat([r.values for r in result])
+        returns = torch.cat([r.returns for r in result])
+        dones = torch.cat([r.dones for r in result])
+        ep_lens = torch.cat([r.ep_lens for r in result])
+        ep_rewards = torch.cat([r.ep_rewards for r in result])
 
         # Fix traj_idx: offset each worker's indices by cumulative sample count
         if self.recurrent:
@@ -286,22 +258,26 @@ class PPO:
             offset = 0
             for r in result:
                 # Skip the first 0 from subsequent workers (it's redundant)
-                worker_traj_idx = r["traj_idx"]
+                worker_traj_idx = r.traj_idx
                 if offset > 0:
                     worker_traj_idx = worker_traj_idx[1:]  # Skip leading 0
                 traj_idx_list.append(worker_traj_idx + offset)
-                offset += len(r["states"])
-            aggregated_data["traj_idx"] = torch.cat(traj_idx_list)
+                offset += len(r.states)
+            traj_idx = torch.cat(traj_idx_list)
         else:
-            aggregated_data["traj_idx"] = torch.cat([r["traj_idx"] for r in result])
+            traj_idx = torch.cat([r.traj_idx for r in result])
 
-        class Data:
-            def __init__(self, data):
-                for key, value in data.items():
-                    setattr(self, key, value)
-
-        data = Data(aggregated_data)
-        return data
+        return BatchData(
+            states=states,
+            actions=actions,
+            rewards=rewards,
+            values=values,
+            returns=returns,
+            dones=dones,
+            traj_idx=traj_idx,
+            ep_lens=ep_lens,
+            ep_rewards=ep_rewards,
+        )
 
     def update_actor_critic(
         self, obs_batch, action_batch, return_batch, advantage_batch, mask, mirror_observation=None, mirror_action=None
@@ -431,17 +407,11 @@ class PPO:
                 batch = self.sample_parallel_with_workers()
                 self.obs_rms.update(batch.states.numpy())
                 print(f"  Warmup batch {i + 1}: {len(batch.states)} samples, obs_rms count: {self.obs_rms.count:.0f}")
-            # Sync warmed-up normalization to policy/critic
+            # Sync warmed-up normalization to all networks
             with torch.no_grad():
                 obs_mean = torch.from_numpy(self.obs_rms.mean).float().to(self.device)
                 obs_std = torch.from_numpy(self.obs_rms.std).float().to(self.device)
-                self.policy.obs_mean = obs_mean
-                self.policy.obs_std = obs_std
-                self.critic.obs_mean = obs_mean
-                self.critic.obs_std = obs_std
-            # Also sync to old_policy for correct PPO ratio computation
-            self.old_policy.obs_mean = obs_mean.clone()
-            self.old_policy.obs_std = obs_std.clone()
+                self._sync_obs_normalization(obs_mean, obs_std)
             print(f"Normalization initialized with {self.obs_rms.count:.0f} samples")
             print(f"  obs_mean range: [{obs_mean.min():.4f}, {obs_mean.max():.4f}]")
             print(f"  obs_std range: [{obs_std.min():.4f}, {obs_std.max():.4f}]")
@@ -478,7 +448,7 @@ class PPO:
             self.total_steps += num_samples
 
             self.old_policy.load_state_dict(self.policy.state_dict())
-            # Sync obs normalization params (not included in state_dict since they're plain tensors)
+            # Sync obs normalization to old_policy (not in state_dict, policy/critic already correct)
             self.old_policy.obs_mean = self.policy.obs_mean.clone()
             self.old_policy.obs_std = self.policy.obs_std.clone()
 

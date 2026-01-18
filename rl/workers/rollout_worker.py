@@ -5,6 +5,7 @@ instance across training iterations, avoiding the expensive environment
 recreation that occurs with stateless Ray remote functions.
 """
 
+import traceback
 from copy import deepcopy
 
 import ray
@@ -12,6 +13,12 @@ import torch
 
 from rl.storage.rollout_storage import PPOBuffer
 from rl.utils.seeding import set_global_seeds
+
+
+class RolloutWorkerError(Exception):
+    """Exception raised when a RolloutWorker encounters an error during sampling."""
+
+    pass
 
 
 @ray.remote
@@ -23,7 +30,7 @@ class RolloutWorker:
     and reuses it across all training iterations.
     """
 
-    def __init__(self, env_fn, policy_template, critic_template, seed=None):
+    def __init__(self, env_fn, policy_template, critic_template, seed=None, worker_id=0):
         """Initialize worker with persistent environment.
 
         Args:
@@ -31,8 +38,10 @@ class RolloutWorker:
             policy_template: Policy network to clone for local inference
             critic_template: Critic network to clone for local inference
             seed: Worker-specific seed for reproducibility
+            worker_id: Identifier for this worker (for error reporting)
         """
         self.seed = seed
+        self.worker_id = worker_id
 
         # Seed worker-local RNG BEFORE creating environment
         if seed is not None:
@@ -51,89 +60,139 @@ class RolloutWorker:
         self.state_dim = self.policy.state_dim
         self.action_dim = self.policy.action_dim
 
-    def set_weights(self, policy_state_dict, critic_state_dict):
-        """Update local network weights from main process.
+        # Track current episode state for persistence across sample() calls
+        # If an episode is ongoing when buffer fills, we continue it next time
+        self.current_state = None
+        self.current_traj_len = 0
+        # Track episode stats incrementally (for logging)
+        self.current_ep_reward = 0.0
+        self.current_ep_len = 0
 
-        This is much cheaper than pickling entire networks because:
-        1. state_dict is just tensors (no graph structure, no Python objects)
-        2. Ray can use shared memory for tensor transfer
+    def sync_state(self, policy_state_dict, critic_state_dict, obs_mean, obs_std, iteration_count):
+        """Sync all worker state from main process in a single call.
+
+        Combines weight updates, observation normalization, and iteration count
+        into one remote call to minimize Ray communication overhead.
 
         Args:
             policy_state_dict: Policy network state dict
             critic_state_dict: Critic network state dict
+            obs_mean: Mean tensor for observation normalization
+            obs_std: Std tensor for observation normalization
+            iteration_count: Current training iteration (for curriculum learning)
         """
+        # Update network weights
         self.policy.load_state_dict(policy_state_dict)
         self.critic.load_state_dict(critic_state_dict)
 
-    def set_iteration_count(self, iteration_count):
-        """Update iteration count for curriculum learning."""
-        self.env.robot.iteration_count = iteration_count
-
-    def set_obs_normalization(self, obs_mean, obs_std):
-        """Update observation normalization params for policy and critic.
-
-        Args:
-            obs_mean: Mean tensor for observation normalization
-            obs_std: Std tensor for observation normalization
-        """
+        # Update observation normalization
         self.policy.obs_mean = obs_mean
         self.policy.obs_std = obs_std
         self.critic.obs_mean = obs_mean
         self.critic.obs_std = obs_std
 
+        # Update iteration count for curriculum learning
+        self.env.robot.iteration_count = iteration_count
+
     @torch.no_grad()
-    def sample(self, gamma, lam, max_steps, max_traj_len, deterministic=False):
+    def sample(self, gamma, max_steps, max_traj_len, deterministic=False):
         """Collect trajectory data using the persistent environment.
+
+        Collects exactly max_steps timesteps. Episodes may span multiple sample()
+        calls - if the buffer fills mid-episode, the episode continues on the
+        next call.
 
         Args:
             gamma: Discount factor for returns
-            lam: GAE lambda (unused currently but kept for compatibility)
             max_steps: Maximum number of timesteps to collect
             max_traj_len: Maximum length of a single trajectory
             deterministic: Whether to use deterministic actions
 
         Returns:
             dict: Collected trajectory data (states, actions, rewards, etc.)
+
+        Raises:
+            RolloutWorkerError: If an error occurs during sampling, with context
+                about which worker failed and the original exception.
         """
         policy = self.policy
         critic = self.critic
         env = self.env
 
-        memory = PPOBuffer(self.state_dim, self.action_dim, gamma, lam, size=max_traj_len * 2)
-        memory_full = False
+        memory = PPOBuffer(self.state_dim, self.action_dim, gamma=gamma, size=max_steps)
+        completed_ep_lens = []
+        completed_ep_rewards = []
 
-        while not memory_full:
-            state = torch.as_tensor(env.reset(), dtype=torch.float)
-            done = False
-            traj_len = 0
+        try:
+            # Initialize or continue from previous episode state
+            if self.current_state is None:
+                state = torch.as_tensor(env.reset(), dtype=torch.float)
+                self.current_traj_len = 0
+                self.current_ep_reward = 0.0
+                self.current_ep_len = 0
+                if hasattr(policy, "init_hidden_state"):
+                    policy.init_hidden_state()
+                if hasattr(critic, "init_hidden_state"):
+                    critic.init_hidden_state()
+            else:
+                state = self.current_state
 
-            if hasattr(policy, "init_hidden_state"):
-                policy.init_hidden_state()
-
-            if hasattr(critic, "init_hidden_state"):
-                critic.init_hidden_state()
-
-            while not done and traj_len < max_traj_len:
+            # Collect exactly max_steps timesteps
+            while len(memory) < max_steps:
                 action = policy(state, deterministic=deterministic)
                 value = critic(state)
 
                 next_state, reward, done, _ = env.step(action.numpy())
+                self.current_traj_len += 1
+                self.current_ep_len += 1
+                self.current_ep_reward += float(reward)
+
+                # Check if trajectory reached max length (truncation)
+                truncated = self.current_traj_len >= max_traj_len
+                episode_ended = done or truncated
 
                 reward = torch.as_tensor(reward, dtype=torch.float)
-                memory.store(state, action, reward, value, done)
-                memory_full = len(memory) >= max_steps
+                memory.store(state, action, reward, value, episode_ended)
 
-                state = torch.as_tensor(next_state, dtype=torch.float)
-                traj_len += 1
+                if episode_ended:
+                    # Record completed episode stats
+                    completed_ep_lens.append(self.current_ep_len)
+                    completed_ep_rewards.append(self.current_ep_reward)
 
-            value = critic(state)
-            memory.finish_path(last_val=(not done) * value)
+                    # Compute returns for this trajectory
+                    # Bootstrap with value estimate if truncated, 0 if truly done
+                    next_state_tensor = torch.as_tensor(next_state, dtype=torch.float)
+                    bootstrap_value = (not done) * critic(next_state_tensor)
+                    memory.finish_path(last_val=bootstrap_value)
 
-        return memory.get_data()
+                    # Reset for new episode
+                    state = torch.as_tensor(env.reset(), dtype=torch.float)
+                    self.current_traj_len = 0
+                    self.current_ep_reward = 0.0
+                    self.current_ep_len = 0
+                    if hasattr(policy, "init_hidden_state"):
+                        policy.init_hidden_state()
+                    if hasattr(critic, "init_hidden_state"):
+                        critic.init_hidden_state()
+                else:
+                    state = torch.as_tensor(next_state, dtype=torch.float)
 
-    def get_env_info(self):
-        """Return environment observation/action space info."""
-        return {
-            "obs_dim": self.env.observation_space.shape[0],
-            "action_dim": self.env.action_space.shape[0],
-        }
+            # Handle case where buffer filled mid-episode
+            # Check if the last transition was not an episode end
+            if not memory.dones[memory.ptr - 1]:
+                # Episode is ongoing - finish path with bootstrap and save state
+                bootstrap_value = critic(state)
+                memory.finish_path(last_val=bootstrap_value)
+                self.current_state = state
+            else:
+                # Episode ended cleanly, no state to preserve
+                self.current_state = None
+
+            return memory.get_data(ep_lens=completed_ep_lens, ep_rewards=completed_ep_rewards)
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            raise RolloutWorkerError(
+                f"Worker {self.worker_id} failed at step {len(memory)}, "
+                f"ep_len={self.current_ep_len}: {type(e).__name__}: {e}\n{tb}"
+            ) from e
