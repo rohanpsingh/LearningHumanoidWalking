@@ -133,7 +133,6 @@ if __name__ == "__main__":
         parser.add_argument("--n-itr", type=int, default=20000, help="Number of iterations of the learning algorithm")
         parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate")  # Xie
         parser.add_argument("--eps", type=float, default=1e-5, help="Adam epsilon (for numerical stability)")
-        parser.add_argument("--lam", type=float, default=0.95, help="Generalized advantage estimate discount")
         parser.add_argument("--gamma", type=float, default=0.99, help="MDP discount")
         parser.add_argument("--std-dev", type=float, default=0.223, help="Action noise for exploration")
         parser.add_argument("--learn-std", action="store_true", help="Exploration noise will be learned")
@@ -141,12 +140,6 @@ if __name__ == "__main__":
         parser.add_argument("--clip", type=float, default=0.2, help="Clipping parameter for PPO surrogate loss")
         parser.add_argument("--minibatch-size", type=int, default=64, help="Batch size for PPO updates")
         parser.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs per PPO update")  # Xie
-        parser.add_argument(
-            "--use-gae",
-            type=bool,
-            default=True,
-            help="Whether or not to calculate returns using Generalized Advantage Estimation",
-        )
         parser.add_argument("--num-procs", type=int, default=12, help="Number of threads to train on")
         parser.add_argument("--max-grad-norm", type=float, default=0.05, help="Value to clip gradients at")
         parser.add_argument("--max-traj-len", type=int, default=400, help="Max episode horizon")
