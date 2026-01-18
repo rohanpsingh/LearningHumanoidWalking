@@ -185,31 +185,26 @@ class PPO:
         """
         max_steps = self.batch_size // self.n_proc
 
-        # Get state dicts and move to CPU for workers
+        # Get state dicts and obs normalization, move to CPU for workers
         # (Workers always run on CPU, even if main process is on GPU)
         policy_state_dict = {k: v.cpu() for k, v in self.policy.state_dict().items()}
         critic_state_dict = {k: v.cpu() for k, v in self.critic.state_dict().items()}
-
-        # Use ray.put() to store state_dicts in object store once, avoiding
-        # redundant serialization when broadcasting to multiple workers
-        policy_state_dict_ref = ray.put(policy_state_dict)
-        critic_state_dict_ref = ray.put(critic_state_dict)
-
-        # Update all workers' weights in parallel
-        weight_futures = [w.set_weights.remote(policy_state_dict_ref, critic_state_dict_ref) for w in self.workers]
-        ray.get(weight_futures)  # Wait for all weights to be updated
-
-        # Sync obs normalization params (not included in state_dict as they're plain tensors)
         obs_mean_cpu = self.policy.obs_mean.cpu()
         obs_std_cpu = self.policy.obs_std.cpu()
+
+        # Use ray.put() to store in object store once, avoiding redundant
+        # serialization when broadcasting to multiple workers
+        policy_ref = ray.put(policy_state_dict)
+        critic_ref = ray.put(critic_state_dict)
         obs_mean_ref = ray.put(obs_mean_cpu)
         obs_std_ref = ray.put(obs_std_cpu)
-        norm_futures = [w.set_obs_normalization.remote(obs_mean_ref, obs_std_ref) for w in self.workers]
-        ray.get(norm_futures)
 
-        # Update iteration count on all workers
-        iter_futures = [w.set_iteration_count.remote(self.iteration_count) for w in self.workers]
-        ray.get(iter_futures)
+        # Sync all state to workers in a single call (weights, normalization, iteration)
+        sync_futures = [
+            w.sync_state.remote(policy_ref, critic_ref, obs_mean_ref, obs_std_ref, self.iteration_count)
+            for w in self.workers
+        ]
+        ray.get(sync_futures)
 
         # Collect samples from all workers in parallel
         sample_futures = [

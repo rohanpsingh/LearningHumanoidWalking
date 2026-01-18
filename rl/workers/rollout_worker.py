@@ -68,35 +68,31 @@ class RolloutWorker:
         self.current_ep_reward = 0.0
         self.current_ep_len = 0
 
-    def set_weights(self, policy_state_dict, critic_state_dict):
-        """Update local network weights from main process.
+    def sync_state(self, policy_state_dict, critic_state_dict, obs_mean, obs_std, iteration_count):
+        """Sync all worker state from main process in a single call.
 
-        This is much cheaper than pickling entire networks because:
-        1. state_dict is just tensors (no graph structure, no Python objects)
-        2. Ray can use shared memory for tensor transfer
+        Combines weight updates, observation normalization, and iteration count
+        into one remote call to minimize Ray communication overhead.
 
         Args:
             policy_state_dict: Policy network state dict
             critic_state_dict: Critic network state dict
+            obs_mean: Mean tensor for observation normalization
+            obs_std: Std tensor for observation normalization
+            iteration_count: Current training iteration (for curriculum learning)
         """
+        # Update network weights
         self.policy.load_state_dict(policy_state_dict)
         self.critic.load_state_dict(critic_state_dict)
 
-    def set_iteration_count(self, iteration_count):
-        """Update iteration count for curriculum learning."""
-        self.env.robot.iteration_count = iteration_count
-
-    def set_obs_normalization(self, obs_mean, obs_std):
-        """Update observation normalization params for policy and critic.
-
-        Args:
-            obs_mean: Mean tensor for observation normalization
-            obs_std: Std tensor for observation normalization
-        """
+        # Update observation normalization
         self.policy.obs_mean = obs_mean
         self.policy.obs_std = obs_std
         self.critic.obs_mean = obs_mean
         self.critic.obs_std = obs_std
+
+        # Update iteration count for curriculum learning
+        self.env.robot.iteration_count = iteration_count
 
     @torch.no_grad()
     def sample(self, gamma, lam, max_steps, max_traj_len, deterministic=False):
