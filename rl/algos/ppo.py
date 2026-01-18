@@ -186,14 +186,21 @@ class PPO:
         policy_state_dict = {k: v.cpu() for k, v in self.policy.state_dict().items()}
         critic_state_dict = {k: v.cpu() for k, v in self.critic.state_dict().items()}
 
+        # Use ray.put() to store state_dicts in object store once, avoiding
+        # redundant serialization when broadcasting to multiple workers
+        policy_state_dict_ref = ray.put(policy_state_dict)
+        critic_state_dict_ref = ray.put(critic_state_dict)
+
         # Update all workers' weights in parallel
-        weight_futures = [w.set_weights.remote(policy_state_dict, critic_state_dict) for w in self.workers]
+        weight_futures = [w.set_weights.remote(policy_state_dict_ref, critic_state_dict_ref) for w in self.workers]
         ray.get(weight_futures)  # Wait for all weights to be updated
 
         # Sync obs normalization params (not included in state_dict as they're plain tensors)
         obs_mean_cpu = self.policy.obs_mean.cpu()
         obs_std_cpu = self.policy.obs_std.cpu()
-        norm_futures = [w.set_obs_normalization.remote(obs_mean_cpu, obs_std_cpu) for w in self.workers]
+        obs_mean_ref = ray.put(obs_mean_cpu)
+        obs_std_ref = ray.put(obs_std_cpu)
+        norm_futures = [w.set_obs_normalization.remote(obs_mean_ref, obs_std_ref) for w in self.workers]
         ray.get(norm_futures)
 
         # Update iteration count on all workers
