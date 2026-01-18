@@ -48,9 +48,11 @@ class EvaluateEnv:
             step_start = time.time()
 
             # forward pass and step
-            raw = (
-                self.policy.forward(torch.tensor(observation, dtype=torch.float32), deterministic=True).detach().numpy()
-            )
+            obs_tensor = torch.tensor(observation, dtype=torch.float32)
+            # Move to same device as policy (handles GPU-trained models)
+            if hasattr(self.policy, "obs_mean") and self.policy.obs_mean is not None:
+                obs_tensor = obs_tensor.to(self.policy.obs_mean.device)
+            raw = self.policy.forward(obs_tensor, deterministic=True).detach().cpu().numpy()
             observation, _, done, _ = self.env.step(raw.copy())
 
             # render scene for video recording

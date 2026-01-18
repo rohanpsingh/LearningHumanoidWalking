@@ -1,8 +1,29 @@
+from dataclasses import dataclass
+
 import torch
 
 
+@dataclass
+class BatchData:
+    """Typed container for batch data from trajectory collection.
+
+    Provides a typed interface instead of anonymous dicts, enabling IDE support,
+    type checking, and clearer code documentation.
+    """
+
+    states: torch.Tensor
+    actions: torch.Tensor
+    rewards: torch.Tensor
+    values: torch.Tensor
+    returns: torch.Tensor
+    dones: torch.Tensor
+    traj_idx: torch.Tensor
+    ep_lens: torch.Tensor
+    ep_rewards: torch.Tensor
+
+
 class PPOBuffer:
-    def __init__(self, obs_len=1, act_len=1, gamma=0.99, lam=0.95, use_gae=False, size=1):
+    def __init__(self, obs_len=1, act_len=1, gamma=0.99, size=1):
         self.states = torch.zeros(size, obs_len, dtype=float)
         self.actions = torch.zeros(size, act_len, dtype=float)
         self.rewards = torch.zeros(size, 1, dtype=float)
@@ -10,7 +31,7 @@ class PPOBuffer:
         self.returns = torch.zeros(size, 1, dtype=float)
         self.dones = torch.zeros(size, 1, dtype=float)
 
-        self.gamma, self.lam = gamma, lam
+        self.gamma = gamma
         self.ptr = 0
         self.traj_idx = [0]
 
@@ -29,12 +50,16 @@ class PPOBuffer:
         self.ptr += 1
 
     def finish_path(self, last_val=None):
+        """Finish a trajectory and compute returns.
+
+        Args:
+            last_val: Bootstrap value for return computation (0 if truly done)
+        """
         self.traj_idx += [self.ptr]
         rewards = self.rewards[self.traj_idx[-2] : self.traj_idx[-1], 0]
         T = len(rewards)
 
         if T == 0:
-            self.dones[-1] = True
             return
 
         # Vectorized discounted returns computation
@@ -56,28 +81,25 @@ class PPOBuffer:
         returns = rev_cumsum[:-1] / discount_powers[:-1]
 
         self.returns[self.traj_idx[-2] : self.traj_idx[-1], 0] = returns
-        self.dones[-1] = True
 
-    def get_data(self):
-        """
-        Return collected data and reset buffer.
+    def get_data(self, ep_lens=None, ep_rewards=None) -> BatchData:
+        """Return collected data as BatchData.
+
+        Args:
+            ep_lens: List of completed episode lengths (from worker)
+            ep_rewards: List of completed episode rewards (from worker)
 
         Returns:
-            dict: Collected trajectory data
+            BatchData with collected trajectory data
         """
-        ep_lens = [j - i for i, j in zip(self.traj_idx, self.traj_idx[1:], strict=False)]
-        ep_rewards = [
-            float(sum(self.rewards[int(i) : int(j)])) for i, j in zip(self.traj_idx, self.traj_idx[1:], strict=False)
-        ]
-        data = {
-            "states": self.states[: self.ptr],
-            "actions": self.actions[: self.ptr],
-            "rewards": self.rewards[: self.ptr],
-            "values": self.values[: self.ptr],
-            "returns": self.returns[: self.ptr],
-            "dones": self.dones[: self.ptr],
-            "traj_idx": torch.Tensor(self.traj_idx),
-            "ep_lens": torch.Tensor(ep_lens),
-            "ep_rewards": torch.Tensor(ep_rewards),
-        }
-        return data
+        return BatchData(
+            states=self.states[: self.ptr],
+            actions=self.actions[: self.ptr],
+            rewards=self.rewards[: self.ptr],
+            values=self.values[: self.ptr],
+            returns=self.returns[: self.ptr],
+            dones=self.dones[: self.ptr],
+            traj_idx=torch.Tensor(self.traj_idx),
+            ep_lens=torch.Tensor(ep_lens if ep_lens else []),
+            ep_rewards=torch.Tensor(ep_rewards if ep_rewards else []),
+        )

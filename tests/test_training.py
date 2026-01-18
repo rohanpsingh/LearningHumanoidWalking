@@ -9,7 +9,6 @@ from functools import partial
 
 import numpy as np
 import pytest
-import ray
 import torch
 
 
@@ -85,10 +84,7 @@ class TestPPOSampling:
         from rl.algos.ppo import PPO
 
         ppo = PPO(env_factory, train_args)
-        policy_ref = ray.put(ppo.policy)
-        critic_ref = ray.put(ppo.critic)
-
-        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
+        batch = ppo.sample_parallel_with_workers()
 
         required_attrs = ["states", "actions", "rewards", "returns", "values", "ep_rewards", "ep_lens"]
         for attr in required_attrs:
@@ -103,10 +99,7 @@ class TestPPOSampling:
         env.close()
 
         ppo = PPO(env_factory, train_args)
-        policy_ref = ray.put(ppo.policy)
-        critic_ref = ray.put(ppo.critic)
-
-        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
+        batch = ppo.sample_parallel_with_workers()
 
         assert batch.states.shape[1] == obs_dim, f"Sampled states dim {batch.states.shape[1]} != obs_dim {obs_dim}"
 
@@ -119,10 +112,7 @@ class TestPPOSampling:
         env.close()
 
         ppo = PPO(env_factory, train_args)
-        policy_ref = ray.put(ppo.policy)
-        critic_ref = ray.put(ppo.critic)
-
-        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
+        batch = ppo.sample_parallel_with_workers()
 
         assert batch.actions.shape[1] == action_dim, (
             f"Sampled actions dim {batch.actions.shape[1]} != action_dim {action_dim}"
@@ -133,10 +123,7 @@ class TestPPOSampling:
         from rl.algos.ppo import PPO
 
         ppo = PPO(env_factory, train_args)
-        policy_ref = ray.put(ppo.policy)
-        critic_ref = ray.put(ppo.critic)
-
-        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
+        batch = ppo.sample_parallel_with_workers()
 
         assert len(batch.values.shape) == 2
         assert batch.values.shape[1] == 1
@@ -153,9 +140,7 @@ class TestPPOUpdate:
         ppo.actor_optimizer = torch.optim.Adam(ppo.policy.parameters(), lr=train_args.lr)
         ppo.critic_optimizer = torch.optim.Adam(ppo.critic.parameters(), lr=train_args.lr)
 
-        policy_ref = ray.put(ppo.policy)
-        critic_ref = ray.put(ppo.critic)
-        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
+        batch = ppo.sample_parallel_with_workers()
 
         observations = batch.states.float()
         actions = batch.actions.float()
@@ -191,9 +176,7 @@ class TestPPOUpdate:
         # Store original weights
         original_weights = {name: param.clone() for name, param in ppo.policy.named_parameters()}
 
-        policy_ref = ray.put(ppo.policy)
-        critic_ref = ray.put(ppo.critic)
-        batch = ppo.sample_parallel(env_factory, policy_ref, critic_ref)
+        batch = ppo.sample_parallel_with_workers()
 
         observations = batch.states.float()
         actions = batch.actions.float()
