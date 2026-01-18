@@ -175,6 +175,25 @@ class PPO:
         ]
         print("Workers created successfully.")
 
+    def _sync_obs_normalization(self, obs_mean, obs_std, include_old_policy=True):
+        """Sync observation normalization params to all networks.
+
+        This is the single point of truth for updating normalization parameters,
+        avoiding scattered manual synchronization throughout the codebase.
+
+        Args:
+            obs_mean: Observation mean tensor
+            obs_std: Observation std tensor
+            include_old_policy: Whether to also sync to old_policy (for PPO ratio)
+        """
+        self.policy.obs_mean = obs_mean
+        self.policy.obs_std = obs_std
+        self.critic.obs_mean = obs_mean
+        self.critic.obs_std = obs_std
+        if include_old_policy:
+            self.old_policy.obs_mean = obs_mean.clone()
+            self.old_policy.obs_std = obs_std.clone()
+
     def sample_parallel_with_workers(self, deterministic=False):
         """Sample trajectories using persistent worker actors.
 
@@ -373,17 +392,11 @@ class PPO:
                 batch = self.sample_parallel_with_workers()
                 self.obs_rms.update(batch.states.numpy())
                 print(f"  Warmup batch {i + 1}: {len(batch.states)} samples, obs_rms count: {self.obs_rms.count:.0f}")
-            # Sync warmed-up normalization to policy/critic
+            # Sync warmed-up normalization to all networks
             with torch.no_grad():
                 obs_mean = torch.from_numpy(self.obs_rms.mean).float().to(self.device)
                 obs_std = torch.from_numpy(self.obs_rms.std).float().to(self.device)
-                self.policy.obs_mean = obs_mean
-                self.policy.obs_std = obs_std
-                self.critic.obs_mean = obs_mean
-                self.critic.obs_std = obs_std
-            # Also sync to old_policy for correct PPO ratio computation
-            self.old_policy.obs_mean = obs_mean.clone()
-            self.old_policy.obs_std = obs_std.clone()
+                self._sync_obs_normalization(obs_mean, obs_std)
             print(f"Normalization initialized with {self.obs_rms.count:.0f} samples")
             print(f"  obs_mean range: [{obs_mean.min():.4f}, {obs_mean.max():.4f}]")
             print(f"  obs_std range: [{obs_std.min():.4f}, {obs_std.max():.4f}]")
@@ -420,7 +433,7 @@ class PPO:
             self.total_steps += num_samples
 
             self.old_policy.load_state_dict(self.policy.state_dict())
-            # Sync obs normalization params (not included in state_dict since they're plain tensors)
+            # Sync obs normalization to old_policy (not in state_dict, policy/critic already correct)
             self.old_policy.obs_mean = self.policy.obs_mean.clone()
             self.old_policy.obs_std = self.policy.obs_std.clone()
 
