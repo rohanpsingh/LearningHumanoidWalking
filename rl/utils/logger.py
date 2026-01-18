@@ -92,6 +92,28 @@ class TrainingLogger:
         self._writer.add_scalar("Eval/mean_reward", mean_reward, step)
         self._writer.add_scalar("Eval/mean_episode_length", mean_ep_len, step)
 
+    def log_timing_metrics(
+        self,
+        fps: float,
+        sample_time: float,
+        optimize_time: float,
+        total_time: float,
+        step: int,
+    ) -> None:
+        """Log timing/performance metrics.
+
+        Args:
+            fps: Frames (steps) per second.
+            sample_time: Time spent sampling trajectories (seconds).
+            optimize_time: Time spent in optimizer (seconds).
+            total_time: Total elapsed training time (seconds).
+            step: Training step/iteration.
+        """
+        self._writer.add_scalar("Time/fps", fps, step)
+        self._writer.add_scalar("Time/sample_time", sample_time, step)
+        self._writer.add_scalar("Time/optimize_time", optimize_time, step)
+        self._writer.add_scalar("Time/total_elapsed", total_time, step)
+
     def flush(self) -> None:
         """Flush pending logs to disk."""
         self._writer.flush()
