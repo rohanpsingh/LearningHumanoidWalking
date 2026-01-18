@@ -51,6 +51,14 @@ class RolloutWorker:
         self.state_dim = self.policy.state_dim
         self.action_dim = self.policy.action_dim
 
+        # Track current episode state for persistence across sample() calls
+        # If an episode is ongoing when buffer fills, we continue it next time
+        self.current_state = None
+        self.current_traj_len = 0
+        # Track episode stats incrementally (for logging)
+        self.current_ep_reward = 0.0
+        self.current_ep_len = 0
+
     def set_weights(self, policy_state_dict, critic_state_dict):
         """Update local network weights from main process.
 
@@ -85,6 +93,10 @@ class RolloutWorker:
     def sample(self, gamma, lam, max_steps, max_traj_len, deterministic=False):
         """Collect trajectory data using the persistent environment.
 
+        Collects exactly max_steps timesteps. Episodes may span multiple sample()
+        calls - if the buffer fills mid-episode, the episode continues on the
+        next call.
+
         Args:
             gamma: Discount factor for returns
             lam: GAE lambda (unused currently but kept for compatibility)
@@ -99,34 +111,72 @@ class RolloutWorker:
         critic = self.critic
         env = self.env
 
-        memory = PPOBuffer(self.state_dim, self.action_dim, gamma, lam, size=max_traj_len * 2)
-        memory_full = False
+        memory = PPOBuffer(self.state_dim, self.action_dim, gamma, lam, size=max_steps)
+        completed_ep_lens = []
+        completed_ep_rewards = []
 
-        while not memory_full:
+        # Initialize or continue from previous episode state
+        if self.current_state is None:
             state = torch.as_tensor(env.reset(), dtype=torch.float)
-            done = False
-            traj_len = 0
-
+            self.current_traj_len = 0
+            self.current_ep_reward = 0.0
+            self.current_ep_len = 0
             if hasattr(policy, "init_hidden_state"):
                 policy.init_hidden_state()
-
             if hasattr(critic, "init_hidden_state"):
                 critic.init_hidden_state()
+        else:
+            state = self.current_state
 
-            while not done and traj_len < max_traj_len:
-                action = policy(state, deterministic=deterministic)
-                value = critic(state)
-
-                next_state, reward, done, _ = env.step(action.numpy())
-
-                reward = torch.as_tensor(reward, dtype=torch.float)
-                memory.store(state, action, reward, value, done)
-                memory_full = len(memory) >= max_steps
-
-                state = torch.as_tensor(next_state, dtype=torch.float)
-                traj_len += 1
-
+        # Collect exactly max_steps timesteps
+        while len(memory) < max_steps:
+            action = policy(state, deterministic=deterministic)
             value = critic(state)
-            memory.finish_path(last_val=(not done) * value)
 
-        return memory.get_data()
+            next_state, reward, done, _ = env.step(action.numpy())
+            self.current_traj_len += 1
+            self.current_ep_len += 1
+            self.current_ep_reward += float(reward)
+
+            # Check if trajectory reached max length (truncation)
+            truncated = self.current_traj_len >= max_traj_len
+            episode_ended = done or truncated
+
+            reward = torch.as_tensor(reward, dtype=torch.float)
+            memory.store(state, action, reward, value, episode_ended)
+
+            if episode_ended:
+                # Record completed episode stats
+                completed_ep_lens.append(self.current_ep_len)
+                completed_ep_rewards.append(self.current_ep_reward)
+
+                # Compute returns for this trajectory
+                # Bootstrap with value estimate if truncated, 0 if truly done
+                next_state_tensor = torch.as_tensor(next_state, dtype=torch.float)
+                bootstrap_value = (not done) * critic(next_state_tensor)
+                memory.finish_path(last_val=bootstrap_value)
+
+                # Reset for new episode
+                state = torch.as_tensor(env.reset(), dtype=torch.float)
+                self.current_traj_len = 0
+                self.current_ep_reward = 0.0
+                self.current_ep_len = 0
+                if hasattr(policy, "init_hidden_state"):
+                    policy.init_hidden_state()
+                if hasattr(critic, "init_hidden_state"):
+                    critic.init_hidden_state()
+            else:
+                state = torch.as_tensor(next_state, dtype=torch.float)
+
+        # Handle case where buffer filled mid-episode
+        # Check if the last transition was not an episode end
+        if not memory.dones[memory.ptr - 1]:
+            # Episode is ongoing - finish path with bootstrap and save state
+            bootstrap_value = critic(state)
+            memory.finish_path(last_val=bootstrap_value)
+            self.current_state = state
+        else:
+            # Episode ended cleanly, no state to preserve
+            self.current_state = None
+
+        return memory.get_data(ep_lens=completed_ep_lens, ep_rewards=completed_ep_rewards)
