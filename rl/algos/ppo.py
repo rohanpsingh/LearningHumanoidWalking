@@ -467,8 +467,8 @@ class PPO:
             values = batch.values.float().to(self.device)
 
             num_samples = len(observations)
-            elapsed = time.time() - sample_start_time
-            print(f"Sampling took {elapsed:.2f}s for {num_samples} steps.")
+            sample_time = time.time() - sample_start_time
+            print(f"Sampling took {sample_time:.2f}s for {num_samples} steps.")
 
             # Normalize advantage (on device)
             advantages = returns - values
@@ -555,8 +555,8 @@ class PPO:
                     imitation_losses.append(imitation_loss.item())
                     clip_fractions.append(clip_fraction)
 
-            elapsed = time.time() - optimizer_start_time
-            print(f"Optimizer took: {elapsed:.2f}s")
+            optimize_time = time.time() - optimizer_start_time
+            print(f"Optimizer took: {optimize_time:.2f}s")
 
             action_noise = self.policy.stds.data.tolist()
 
@@ -574,12 +574,13 @@ class PPO:
             sys.stdout.write("-" * 37 + "\n")
             sys.stdout.flush()
 
-            elapsed = time.time() - train_start_time
-            iter_avg = elapsed / (itr + 1)
+            total_time = time.time() - train_start_time
+            fps = self.total_steps / total_time
+            iter_avg = total_time / (itr + 1)
             ETA = round((n_itr - itr) * iter_avg)
             print(
-                f"Total time elapsed: {elapsed:.2f}s. Total steps: {self.total_steps} "
-                f"(fps={self.total_steps / elapsed:.2f}. iter-avg={iter_avg:.2f}s. "
+                f"Total time elapsed: {total_time:.2f}s. Total steps: {self.total_steps} "
+                f"(fps={fps:.2f}. iter-avg={iter_avg:.2f}s. "
                 f"ETA={datetime.timedelta(seconds=ETA)})"
             )
 
@@ -613,6 +614,15 @@ class PPO:
                 mean_reward=float(torch.mean(batch.ep_rewards)),
                 mean_ep_len=float(torch.mean(batch.ep_lens)),
                 mean_noise_std=np.mean(action_noise),
+                step=itr,
+            )
+
+            # tensorboard logging for timing/performance metrics
+            self.logger.log_timing_metrics(
+                fps=fps,
+                sample_time=sample_time,
+                optimize_time=optimize_time,
+                total_time=total_time,
                 step=itr,
             )
 
