@@ -57,8 +57,9 @@ class PPO:
         self.checkpointer = ModelCheckpointer(self.save_path)
 
         # create networks or load up pretrained
-        obs_dim = env_fn().observation_space.shape[0]
-        action_dim = env_fn().action_space.shape[0]
+        env_instance = env_fn()  # single env instance for initialization queries
+        obs_dim = env_instance.observation_space.shape[0]
+        action_dim = env_instance.action_space.shape[0]
         if args.continued:
             path_to_actor = args.continued
             path_to_critic = Path(args.continued.parent, "critic" + str(args.continued).split("actor")[1])
@@ -83,8 +84,7 @@ class PPO:
                 )
                 critic = FF_V(obs_dim)
 
-            # Setup observation normalization
-            env_instance = env_fn()
+            # Setup observation normalization (reuse env_instance from above)
             if hasattr(env_instance, "obs_mean") and hasattr(env_instance, "obs_std"):
                 # Use fixed normalization params from environment
                 obs_mean, obs_std = env_instance.obs_mean, env_instance.obs_std
@@ -97,7 +97,7 @@ class PPO:
                 print("Using running observation normalization (will update during training).")
 
             with torch.no_grad():
-                policy.obs_mean, policy.obs_std = map(torch.Tensor, (obs_mean, obs_std))
+                policy.obs_mean, policy.obs_std = map(torch.tensor, (obs_mean, obs_std))
                 critic.obs_mean = policy.obs_mean
                 critic.obs_std = policy.obs_std
 

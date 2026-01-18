@@ -31,14 +31,14 @@ class SymmetricEnv:
         )
 
         if mirrored_act:
-            self.act_mirror_matrix = torch.Tensor(_get_symmetry_matrix(mirrored_act))
+            self.act_mirror_matrix = torch.tensor(_get_symmetry_matrix(mirrored_act))
 
         elif act_fn:
             assert callable(act_fn), "Action mirror function must be callable"
             self.mirror_action = act_fn
 
         if mirrored_obs:
-            self.obs_mirror_matrix = torch.Tensor(_get_symmetry_matrix(mirrored_obs))
+            self.obs_mirror_matrix = torch.tensor(_get_symmetry_matrix(mirrored_obs))
 
         elif obs_fn:
             assert callable(obs_fn), "Observation mirror function must be callable"

@@ -99,7 +99,7 @@ class PPOBuffer:
             values=self.values[: self.ptr],
             returns=self.returns[: self.ptr],
             dones=self.dones[: self.ptr],
-            traj_idx=torch.Tensor(self.traj_idx),
-            ep_lens=torch.Tensor(ep_lens if ep_lens else []),
-            ep_rewards=torch.Tensor(ep_rewards if ep_rewards else []),
+            traj_idx=torch.tensor(self.traj_idx),
+            ep_lens=torch.tensor(ep_lens if ep_lens else []),
+            ep_rewards=torch.tensor(ep_rewards if ep_rewards else []),
         )
