@@ -14,7 +14,7 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
-from rl.envs.normalize import get_normalization_params
+from rl.envs.normalize import RunningMeanStd
 from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
 from rl.storage.rollout_storage import PPOBuffer
@@ -73,6 +73,8 @@ class PPO:
                 policy.stds = args.std_dev * torch.ones(action_dim)
             print("Loaded (pre-trained) actor from: ", path_to_actor)
             print("Loaded (pre-trained) critic from: ", path_to_critic)
+            # Pretrained models already have obs normalization embedded
+            self.obs_rms = None
         else:
             if args.recurrent:
                 policy = Gaussian_LSTM_Actor(obs_dim, action_dim, init_std=args.std_dev, learn_std=args.learn_std)
@@ -83,17 +85,19 @@ class PPO:
                 )
                 critic = FF_V(obs_dim)
 
-            if hasattr(env_fn(), "obs_mean") and hasattr(env_fn(), "obs_std"):
-                obs_mean, obs_std = env_fn().obs_mean, env_fn().obs_std
+            # Setup observation normalization
+            env_instance = env_fn()
+            if hasattr(env_instance, "obs_mean") and hasattr(env_instance, "obs_std"):
+                # Use fixed normalization params from environment
+                obs_mean, obs_std = env_instance.obs_mean, env_instance.obs_std
+                self.obs_rms = None  # No running stats needed
+                print("Using fixed observation normalization from environment.")
             else:
-                obs_mean, obs_std = get_normalization_params(
-                    iter=args.input_norm_steps,
-                    noise_std=1,
-                    policy=policy,
-                    env_fn=env_fn,
-                    procs=args.num_procs,
-                    seed=self.seed,
-                )
+                # Use running mean/std that will be updated during training
+                self.obs_rms = RunningMeanStd(shape=(obs_dim,))
+                obs_mean, obs_std = self.obs_rms.mean, self.obs_rms.std
+                print("Using running observation normalization (will update during training).")
+
             with torch.no_grad():
                 policy.obs_mean, policy.obs_std = map(torch.Tensor, (obs_mean, obs_std))
                 critic.obs_mean = policy.obs_mean
@@ -230,6 +234,12 @@ class PPO:
         # Update all workers' weights in parallel
         weight_futures = [w.set_weights.remote(policy_state_dict, critic_state_dict) for w in self.workers]
         ray.get(weight_futures)  # Wait for all weights to be updated
+
+        # Sync obs normalization params (not included in state_dict as they're plain tensors)
+        obs_mean_cpu = self.policy.obs_mean.cpu()
+        obs_std_cpu = self.policy.obs_std.cpu()
+        norm_futures = [w.set_obs_normalization.remote(obs_mean_cpu, obs_std_cpu) for w in self.workers]
+        ray.get(norm_futures)
 
         # Update iteration count on all workers
         iter_futures = [w.set_iteration_count.remote(self.iteration_count) for w in self.workers]
@@ -412,6 +422,30 @@ class PPO:
         if hasattr(env_fn(), "mirror_action"):
             act_mirr = env_fn().mirror_action
 
+        # Warmup phase for running observation normalization
+        if self.obs_rms is not None:
+            print("Warming up observation normalization...")
+            print(f"  Initial policy norm - mean: {self.policy.obs_mean[:3]}..., std: {self.policy.obs_std[:3]}...")
+            warmup_batches = 5
+            for i in range(warmup_batches):
+                batch = self.sample_parallel_with_workers()
+                self.obs_rms.update(batch.states.numpy())
+                print(f"  Warmup batch {i + 1}: {len(batch.states)} samples, obs_rms count: {self.obs_rms.count:.0f}")
+            # Sync warmed-up normalization to policy/critic
+            with torch.no_grad():
+                obs_mean = torch.from_numpy(self.obs_rms.mean).float().to(self.device)
+                obs_std = torch.from_numpy(self.obs_rms.std).float().to(self.device)
+                self.policy.obs_mean = obs_mean
+                self.policy.obs_std = obs_std
+                self.critic.obs_mean = obs_mean
+                self.critic.obs_std = obs_std
+            # Also sync to old_policy for correct PPO ratio computation
+            self.old_policy.obs_mean = obs_mean.clone()
+            self.old_policy.obs_std = obs_std.clone()
+            print(f"Normalization initialized with {self.obs_rms.count:.0f} samples")
+            print(f"  obs_mean range: [{obs_mean.min():.4f}, {obs_mean.max():.4f}]")
+            print(f"  obs_std range: [{obs_std.min():.4f}, {obs_std.max():.4f}]")
+
         for itr in range(n_itr):
             print(f"********** Iteration {itr} ************")
 
@@ -444,6 +478,9 @@ class PPO:
             self.total_steps += num_samples
 
             self.old_policy.load_state_dict(self.policy.state_dict())
+            # Sync obs normalization params (not included in state_dict since they're plain tensors)
+            self.old_policy.obs_mean = self.policy.obs_mean.clone()
+            self.old_policy.obs_std = self.policy.obs_std.clone()
 
             optimizer_start_time = time.time()
 
@@ -578,3 +615,7 @@ class PPO:
                 mean_noise_std=np.mean(action_noise),
                 step=itr,
             )
+
+            # Note: Running observation normalization is fixed after warmup
+            # to maintain training stability. The normalization params were
+            # initialized during the warmup phase before training started.

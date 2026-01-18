@@ -1,237 +1,74 @@
-# Modified from https://github.com/openai/baselines/blob/master/baselines/common/vec_env/vec_normalize.py
-# Thanks to the authors + OpenAI for the code
-
-
 import numpy as np
-import ray
-import torch
-
-from rl.utils.seeding import get_worker_seed, set_global_seeds
-
-from .wrappers import WrapEnv
-
-
-@ray.remote
-def _run_random_actions(iter, policy, env_fn, noise_std, seed=None):
-    # Seed worker-local RNG before any randomness
-    if seed is not None:
-        set_global_seeds(seed, cuda_deterministic=False)
-
-    # Global RNG already seeded above, so env will use seeded np.random
-    env = WrapEnv(env_fn)
-
-    states = np.zeros((iter, env.observation_space.shape[0]))
-
-    # Create generator once for deterministic noise (reuse throughout loop)
-    if seed is not None:
-        noise_gen = torch.Generator()
-        noise_gen.manual_seed(seed)
-    else:
-        noise_gen = None
-
-    state = env.reset()
-    for t in range(iter):
-        states[t, :] = state
-
-        state = torch.Tensor(state)
-
-        action = policy(state)
-
-        # add gaussian noise to deterministic action
-        noise = torch.randn(action.size(), generator=noise_gen) * noise_std
-        action = action + noise
-
-        state, _, done, _ = env.step(action.data.numpy())
-
-        if done:
-            state = env.reset()
-
-    return states
-
-
-def get_normalization_params(iter, policy, env_fn, noise_std, procs=4, seed=None):
-    print(f"Gathering input normalization data using {iter} steps, noise = {noise_std}...")
-
-    states_ids = [
-        _run_random_actions.remote(
-            iter // procs,
-            policy,
-            env_fn,
-            noise_std,
-            seed=get_worker_seed(seed, i, offset=1) if seed is not None else None,
-        )
-        for i in range(procs)
-    ]
-
-    states = []
-    for _ in range(procs):
-        ready_ids, _ = ray.wait(states_ids, num_returns=1)
-        states.extend(ray.get(ready_ids[0]))
-        states_ids.remove(ready_ids[0])
-
-    print("Done gathering input normalization data.")
-
-    return np.mean(states, axis=0), np.sqrt(np.var(states, axis=0) + 1e-8)
-
-
-# returns a function that creates a normalized environment, then pre-normalizes it
-# using states sampled from a deterministic policy with some added noise
-def PreNormalizer(iter, noise_std, policy, *args, **kwargs):
-    # noise is gaussian noise
-    @torch.no_grad()
-    def pre_normalize(env, policy, num_iter, noise_std):
-        # save whether or not the environment is configured to do online normalization
-        online_val = env.online
-        env.online = True
-
-        state = env.reset()
-
-        for _t in range(num_iter):
-            state = torch.Tensor(state)
-
-            _, action = policy(state)
-
-            # add gaussian noise to deterministic action
-            action = action + torch.randn(action.size()) * noise_std
-
-            state, _, done, _ = env.step(action.data.numpy())
-
-            if done:
-                state = env.reset()
-
-        env.online = online_val
-
-    def _Normalizer(venv):
-        venv = Normalize(venv, *args, **kwargs)
-
-        print(f"Gathering input normalization data using {iter} steps, noise = {noise_std}...")
-        pre_normalize(venv, policy, iter, noise_std)
-        print("Done gathering input normalization data.")
-
-        return venv
-
-    return _Normalizer
-
-
-# returns a function that creates a normalized environment
-def Normalizer(*args, **kwargs):
-    def _Normalizer(venv):
-        return Normalize(venv, *args, **kwargs)
-
-    return _Normalizer
-
-
-class Normalize:
-    """
-    Vectorized environment base class
-    """
-
-    def __init__(
-        self, venv, ob_rms=None, ob=True, ret=False, clipob=10.0, cliprew=10.0, online=True, gamma=1.0, epsilon=1e-8
-    ):
-        self.venv = venv
-        self._observation_space = venv.observation_space
-        self._action_space = venv.action_space
-
-        if ob_rms is not None:
-            self.ob_rms = ob_rms
-        else:
-            self.ob_rms = RunningMeanStd(shape=self._observation_space.shape) if ob else None
-
-        self.ret_rms = RunningMeanStd(shape=()) if ret else None
-        self.clipob = clipob
-        self.cliprew = cliprew
-        self.ret = np.zeros(self.num_envs)
-        self.gamma = gamma
-        self.epsilon = epsilon
-
-        self.online = online
-
-    def step(self, vac):
-        obs, rews, news, infos = self.venv.step(vac)
-
-        # self.ret = self.ret * self.gamma + rews
-        obs = self._obfilt(obs)
-
-        # NOTE: shifting mean of reward seems bad; qualitatively changes MDP
-        if self.ret_rms:
-            if self.online:
-                self.ret_rms.update(self.ret)
-
-            rews = np.clip(rews / np.sqrt(self.ret_rms.var + self.epsilon), -self.cliprew, self.cliprew)
-
-        return obs, rews, news, infos
-
-    def _obfilt(self, obs):
-        if self.ob_rms:
-            if self.online:
-                self.ob_rms.update(obs)
-
-            obs = np.clip((obs - self.ob_rms.mean) / np.sqrt(self.ob_rms.var + self.epsilon), -self.clipob, self.clipob)
-            return obs
-        else:
-            return obs
-
-    def reset(self):
-        """
-        Reset all environments
-        """
-        obs = self.venv.reset()
-        return self._obfilt(obs)
-
-    @property
-    def action_space(self):
-        return self._action_space
-
-    @property
-    def observation_space(self):
-        return self._observation_space
-
-    def close(self):
-        self.venv.close()
-
-    def render(self):
-        self.venv.render()
-
-    @property
-    def num_envs(self):
-        return self.venv.num_envs
 
 
 class RunningMeanStd:
-    # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
+    """Tracks running mean and variance using Welford's online algorithm.
+
+    Reference: https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
+    """
+
     def __init__(self, epsilon=1e-4, shape=()):
-        self.mean = np.zeros(shape, "float64")
-        self.var = np.zeros(shape, "float64")
+        self.mean = np.zeros(shape, dtype=np.float64)
+        self.var = np.ones(shape, dtype=np.float64)
         self.count = epsilon
 
     def update(self, x):
+        """Update running stats with new observations.
+
+        Args:
+            x: Observations array. Can be a single observation (1D) or batch (2D).
+        """
+        x = np.asarray(x)
+
+        # Handle single observation
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+
         batch_mean = np.mean(x, axis=0)
         batch_var = np.var(x, axis=0)
         batch_count = x.shape[0]
 
+        self._update_from_moments(batch_mean, batch_var, batch_count)
+
+    def _update_from_moments(self, batch_mean, batch_var, batch_count):
+        """Update from pre-computed batch statistics (for parallel updates)."""
         delta = batch_mean - self.mean
         tot_count = self.count + batch_count
 
         new_mean = self.mean + delta * batch_count / tot_count
-        m_a = self.var * (self.count)
-        m_b = batch_var * (batch_count)
-        M2 = m_a + m_b + np.square(delta) * self.count * batch_count / (self.count + batch_count)
-        new_var = M2 / (self.count + batch_count)
-
-        new_count = batch_count + self.count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + np.square(delta) * self.count * batch_count / tot_count
+        new_var = M2 / tot_count
 
         self.mean = new_mean
         self.var = new_var
-        self.count = new_count
+        self.count = tot_count
+
+    @property
+    def std(self):
+        """Return standard deviation (no minimum clamp - uses actual statistics)."""
+        return np.sqrt(self.var + 1e-8)
+
+    def get_state(self):
+        """Return state dict for saving."""
+        return {"mean": self.mean.copy(), "var": self.var.copy(), "count": self.count}
+
+    def set_state(self, state):
+        """Load state from dict."""
+        self.mean = state["mean"].copy()
+        self.var = state["var"].copy()
+        self.count = state["count"]
 
 
 def test_runningmeanstd():
+    """Test that incremental updates match batch statistics."""
+    # Test with batches of 2D observations
     for x1, x2, x3 in [
-        (np.random.randn(3), np.random.randn(4), np.random.randn(5)),
+        (np.random.randn(3, 5), np.random.randn(4, 5), np.random.randn(5, 5)),
         (np.random.randn(3, 2), np.random.randn(4, 2), np.random.randn(5, 2)),
     ]:
-        rms = RunningMeanStd(epsilon=0.0, shape=x1.shape[1:])
+        rms = RunningMeanStd(epsilon=0.0, shape=(x1.shape[1],))
 
         x = np.concatenate([x1, x2, x3], axis=0)
         ms1 = [x.mean(axis=0), x.var(axis=0)]
@@ -241,3 +78,8 @@ def test_runningmeanstd():
         ms2 = [rms.mean, rms.var]
 
         assert np.allclose(ms1, ms2)
+
+
+if __name__ == "__main__":
+    test_runningmeanstd()
+    print("RunningMeanStd tests passed!")
