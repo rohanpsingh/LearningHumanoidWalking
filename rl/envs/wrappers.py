@@ -51,25 +51,26 @@ class SymmetricEnv:
         return getattr(self.env, attr)
 
     def mirror_action(self, action):
-        return action @ self.act_mirror_matrix
+        matrix = self.act_mirror_matrix.to(action.device)
+        return action @ matrix
 
     def mirror_observation(self, obs):
-        return obs @ self.obs_mirror_matrix
+        matrix = self.obs_mirror_matrix.to(obs.device)
+        return obs @ matrix
 
     # To be used when there is a clock in the observation. In this case, the mirrored_obs vector inputted
     # when the SymmeticEnv is created should not move the clock input order. The indices of the obs vector
     # where the clocks are located need to be inputted.
     def mirror_clock_observation(self, obs):
-        # print("obs.shape = ", obs.shape)
-        # print("obs_mirror_matrix.shape = ", self.obs_mirror_matrix.shape)
+        matrix = self.obs_mirror_matrix.to(obs.device)
         mirror_obs_batch = torch.zeros_like(obs)
         history_len = 1  # FIX HISTORY-OF-STATES LENGTH TO 1 FOR NOW
         for block in range(history_len):
             obs_ = obs[:, self.base_obs_len * block : self.base_obs_len * (block + 1)]
-            mirror_obs = obs_ @ self.obs_mirror_matrix
+            mirror_obs = obs_ @ matrix
             clock = mirror_obs[:, self.clock_inds]
-            for i in range(np.shape(clock)[1]):
-                mirror_obs[:, self.clock_inds[i]] = np.sin(np.arcsin(clock[:, i]) + np.pi)
+            for i in range(clock.shape[1]):
+                mirror_obs[:, self.clock_inds[i]] = torch.sin(torch.arcsin(clock[:, i]) + np.pi)
             mirror_obs_batch[:, self.base_obs_len * block : self.base_obs_len * (block + 1)] = mirror_obs
         return mirror_obs_batch
 
