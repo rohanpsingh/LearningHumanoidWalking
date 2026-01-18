@@ -167,7 +167,11 @@ class PPO:
 
         self.workers = [
             RolloutWorker.remote(
-                env_fn, policy_cpu, critic_cpu, seed=get_worker_seed(self.seed, i) if self.seed is not None else None
+                env_fn,
+                policy_cpu,
+                critic_cpu,
+                seed=get_worker_seed(self.seed, i) if self.seed is not None else None,
+                worker_id=i,
             )
             for i in range(self.n_proc)
         ]
