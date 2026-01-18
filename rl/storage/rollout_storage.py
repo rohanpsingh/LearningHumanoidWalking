@@ -2,7 +2,7 @@ import torch
 
 
 class PPOBuffer:
-    def __init__(self, obs_len=1, act_len=1, gamma=0.99, lam=0.95, use_gae=False, size=1):
+    def __init__(self, obs_len=1, act_len=1, gamma=0.99, size=1):
         self.states = torch.zeros(size, obs_len, dtype=float)
         self.actions = torch.zeros(size, act_len, dtype=float)
         self.rewards = torch.zeros(size, 1, dtype=float)
@@ -10,7 +10,7 @@ class PPOBuffer:
         self.returns = torch.zeros(size, 1, dtype=float)
         self.dones = torch.zeros(size, 1, dtype=float)
 
-        self.gamma, self.lam = gamma, lam
+        self.gamma = gamma
         self.ptr = 0
         self.traj_idx = [0]
 

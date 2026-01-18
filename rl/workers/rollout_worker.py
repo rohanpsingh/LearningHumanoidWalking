@@ -95,7 +95,7 @@ class RolloutWorker:
         self.env.robot.iteration_count = iteration_count
 
     @torch.no_grad()
-    def sample(self, gamma, lam, max_steps, max_traj_len, deterministic=False):
+    def sample(self, gamma, max_steps, max_traj_len, deterministic=False):
         """Collect trajectory data using the persistent environment.
 
         Collects exactly max_steps timesteps. Episodes may span multiple sample()
@@ -104,7 +104,6 @@ class RolloutWorker:
 
         Args:
             gamma: Discount factor for returns
-            lam: GAE lambda (unused currently but kept for compatibility)
             max_steps: Maximum number of timesteps to collect
             max_traj_len: Maximum length of a single trajectory
             deterministic: Whether to use deterministic actions
@@ -120,7 +119,7 @@ class RolloutWorker:
         critic = self.critic
         env = self.env
 
-        memory = PPOBuffer(self.state_dim, self.action_dim, gamma, lam, size=max_steps)
+        memory = PPOBuffer(self.state_dim, self.action_dim, gamma=gamma, size=max_steps)
         completed_ep_lens = []
         completed_ep_rewards = []
 

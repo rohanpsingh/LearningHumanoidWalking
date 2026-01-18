@@ -26,7 +26,6 @@ class PPO:
     def __init__(self, env_fn, args, seed=None):
         self.seed = seed
         self.gamma = args.gamma
-        self.lam = args.lam
         self.lr = args.lr
         self.eps = args.eps
         self.ent_coeff = args.entropy_coeff
@@ -34,7 +33,6 @@ class PPO:
         self.minibatch_size = args.minibatch_size
         self.epochs = args.epochs
         self.max_traj_len = args.max_traj_len
-        self.use_gae = args.use_gae
         self.n_proc = args.num_procs
         self.grad_clip = args.max_grad_norm
         self.mirror_coeff = args.mirror_coeff
@@ -208,7 +206,7 @@ class PPO:
 
         # Collect samples from all workers in parallel
         sample_futures = [
-            w.sample.remote(self.gamma, self.lam, max_steps, self.max_traj_len, deterministic) for w in self.workers
+            w.sample.remote(self.gamma, max_steps, self.max_traj_len, deterministic) for w in self.workers
         ]
         result = ray.get(sample_futures)
 
