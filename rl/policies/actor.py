@@ -63,7 +63,7 @@ class LSTM_Actor(Actor):
         self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
         for i in range(len(layers) - 1):
             self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
-        self.network_out = nn.Linear(layers[i - 1], action_dim)
+        self.network_out = nn.Linear(layers[-1], action_dim)
 
         self.action_dim = action_dim
         self.init_hidden_state()
@@ -79,15 +79,21 @@ class LSTM_Actor(Actor):
 
         self.hidden, self.cells = data
 
-    def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
+    def _get_device(self):
+        """Get device from network parameters."""
+        return next(self.parameters()).device
+
+    def init_hidden_state(self, batch_size=1, device=None):
+        if device is None:
+            device = self._get_device()
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
 
     def forward(self, x, deterministic=True):
         dims = len(x.size())
 
         if dims == 3:  # if we get a batch of trajectories
-            self.init_hidden_state(batch_size=x.size(1))
+            self.init_hidden_state(batch_size=x.size(1), device=x.device)
             y = []
             for _t, x_t in enumerate(x):
                 for idx, layer in enumerate(self.actor_layers):
@@ -105,12 +111,11 @@ class LSTM_Actor(Actor):
                 h, c = self.hidden[idx], self.cells[idx]
                 self.hidden[idx], self.cells[idx] = layer(x, (h, c))
                 x = self.hidden[idx]
-            x = self.nonlinearity(self.network_out(x))
 
             if dims == 1:
                 x = x.view(-1)
 
-        action = self.network_out(x)
+        action = self.nonlinearity(self.network_out(x))
         return action
 
 
@@ -208,7 +213,7 @@ class Gaussian_LSTM_Actor(Actor):
         self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
         for i in range(len(layers) - 1):
             self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
-        self.network_out = nn.Linear(layers[i - 1], action_dim)
+        self.network_out = nn.Linear(layers[-1], action_dim)
 
         self.action_dim = action_dim
         self.state_dim = state_dim
@@ -230,6 +235,10 @@ class Gaussian_LSTM_Actor(Actor):
 
         self.act = self.forward
 
+    def _get_device(self):
+        """Get device from network parameters."""
+        return next(self.parameters()).device
+
     def _get_dist_params(self, state):
         state = (state - self.obs_mean) / self.obs_std
 
@@ -237,7 +246,7 @@ class Gaussian_LSTM_Actor(Actor):
 
         x = state
         if dims == 3:  # if we get a batch of trajectories
-            self.init_hidden_state(batch_size=x.size(1))
+            self.init_hidden_state(batch_size=x.size(1), device=x.device)
             y = []
             for _t, x_t in enumerate(x):
                 for idx, layer in enumerate(self.actor_layers):
@@ -263,9 +272,11 @@ class Gaussian_LSTM_Actor(Actor):
         sd = self.stds
         return mu, sd
 
-    def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
+    def init_hidden_state(self, batch_size=1, device=None):
+        if device is None:
+            device = self._get_device()
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
 
     def forward(self, state, deterministic=True):
         mu, sd = self._get_dist_params(state)

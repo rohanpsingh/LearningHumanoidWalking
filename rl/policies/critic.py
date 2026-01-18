@@ -97,16 +97,22 @@ class LSTM_V(Critic):
     def get_hidden_state(self):
         return self.hidden, self.cells
 
-    def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.critic_layers]
-        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.critic_layers]
+    def _get_device(self):
+        """Get device from network parameters."""
+        return next(self.parameters()).device
+
+    def init_hidden_state(self, batch_size=1, device=None):
+        if device is None:
+            device = self._get_device()
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.critic_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.critic_layers]
 
     def forward(self, state):
         state = (state - self.obs_mean) / self.obs_std
         dims = len(state.size())
 
         if dims == 3:  # if we get a batch of trajectories
-            self.init_hidden_state(batch_size=state.size(1))
+            self.init_hidden_state(batch_size=state.size(1), device=state.device)
             value = []
             for _t, state_batch_t in enumerate(state):
                 x_t = state_batch_t
