@@ -17,6 +17,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from rl.envs.normalize import RunningMeanStd
 from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
+from rl.storage.rollout_storage import BatchData
 from rl.utils import ModelCheckpointer, TrainingLogger
 from rl.utils.seeding import get_worker_seed
 from rl.workers import RolloutWorker
@@ -231,15 +232,25 @@ class PPO:
 
         return self._aggregate_results(result)
 
-    def _aggregate_results(self, result):
-        # Aggregate results - handle traj_idx specially for recurrent policies
-        # (indices need to be offset to reference correct positions in concatenated data)
-        data_keys = ["states", "actions", "rewards", "values", "returns", "dones"]
-        aggregated_data = {k: torch.cat([r[k] for r in result]) for k in data_keys}
+    def _aggregate_results(self, result) -> BatchData:
+        """Aggregate results from multiple workers into a single BatchData.
 
-        # Concatenate scalar metrics directly
-        aggregated_data["ep_lens"] = torch.cat([r["ep_lens"] for r in result])
-        aggregated_data["ep_rewards"] = torch.cat([r["ep_rewards"] for r in result])
+        Args:
+            result: List of dicts from worker sample() calls
+
+        Returns:
+            BatchData with concatenated tensors from all workers
+        """
+        # Aggregate trajectory data - handle traj_idx specially for recurrent policies
+        # (indices need to be offset to reference correct positions in concatenated data)
+        states = torch.cat([r["states"] for r in result])
+        actions = torch.cat([r["actions"] for r in result])
+        rewards = torch.cat([r["rewards"] for r in result])
+        values = torch.cat([r["values"] for r in result])
+        returns = torch.cat([r["returns"] for r in result])
+        dones = torch.cat([r["dones"] for r in result])
+        ep_lens = torch.cat([r["ep_lens"] for r in result])
+        ep_rewards = torch.cat([r["ep_rewards"] for r in result])
 
         # Fix traj_idx: offset each worker's indices by cumulative sample count
         if self.recurrent:
@@ -252,17 +263,21 @@ class PPO:
                     worker_traj_idx = worker_traj_idx[1:]  # Skip leading 0
                 traj_idx_list.append(worker_traj_idx + offset)
                 offset += len(r["states"])
-            aggregated_data["traj_idx"] = torch.cat(traj_idx_list)
+            traj_idx = torch.cat(traj_idx_list)
         else:
-            aggregated_data["traj_idx"] = torch.cat([r["traj_idx"] for r in result])
+            traj_idx = torch.cat([r["traj_idx"] for r in result])
 
-        class Data:
-            def __init__(self, data):
-                for key, value in data.items():
-                    setattr(self, key, value)
-
-        data = Data(aggregated_data)
-        return data
+        return BatchData(
+            states=states,
+            actions=actions,
+            rewards=rewards,
+            values=values,
+            returns=returns,
+            dones=dones,
+            traj_idx=traj_idx,
+            ep_lens=ep_lens,
+            ep_rewards=ep_rewards,
+        )
 
     def update_actor_critic(
         self, obs_batch, action_batch, return_batch, advantage_batch, mask, mirror_observation=None, mirror_action=None

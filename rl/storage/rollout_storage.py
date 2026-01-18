@@ -1,4 +1,25 @@
+from dataclasses import dataclass
+
 import torch
+
+
+@dataclass
+class BatchData:
+    """Typed container for batch data from trajectory collection.
+
+    Provides a typed interface instead of anonymous dicts, enabling IDE support,
+    type checking, and clearer code documentation.
+    """
+
+    states: torch.Tensor
+    actions: torch.Tensor
+    rewards: torch.Tensor
+    values: torch.Tensor
+    returns: torch.Tensor
+    dones: torch.Tensor
+    traj_idx: torch.Tensor
+    ep_lens: torch.Tensor
+    ep_rewards: torch.Tensor
 
 
 class PPOBuffer:
