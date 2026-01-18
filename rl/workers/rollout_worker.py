@@ -130,10 +130,3 @@ class RolloutWorker:
             memory.finish_path(last_val=(not done) * value)
 
         return memory.get_data()
-
-    def get_env_info(self):
-        """Return environment observation/action space info."""
-        return {
-            "obs_dim": self.env.observation_space.shape[0],
-            "action_dim": self.env.action_space.shape[0],
-        }

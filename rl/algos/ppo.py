@@ -17,7 +17,6 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from rl.envs.normalize import RunningMeanStd
 from rl.policies.actor import Gaussian_FF_Actor, Gaussian_LSTM_Actor
 from rl.policies.critic import FF_V, LSTM_V
-from rl.storage.rollout_storage import PPOBuffer
 from rl.utils import ModelCheckpointer, TrainingLogger
 from rl.utils.seeding import get_worker_seed
 from rl.workers import RolloutWorker
@@ -174,50 +173,6 @@ class PPO:
         ]
         print("Workers created successfully.")
 
-    @ray.remote
-    @torch.no_grad()
-    @staticmethod
-    def sample(env_fn, policy, critic, gamma, lam, iteration_count, max_steps, max_traj_len, deterministic):
-        """
-        Sample max_steps number of total timesteps, truncating
-        trajectories if they exceed max_traj_len number of timesteps.
-        """
-        env = env_fn()
-        env.robot.iteration_count = iteration_count
-
-        memory = PPOBuffer(policy.state_dim, policy.action_dim, gamma, lam, size=max_traj_len * 2)
-        memory_full = False
-
-        while not memory_full:
-            state = torch.as_tensor(env.reset(), dtype=torch.float)
-            done = False
-            traj_len = 0
-
-            if hasattr(policy, "init_hidden_state"):
-                policy.init_hidden_state()
-
-            if hasattr(critic, "init_hidden_state"):
-                critic.init_hidden_state()
-
-            while not done and traj_len < max_traj_len:
-                action = policy(state, deterministic=deterministic)
-                value = critic(state)
-
-                # .numpy() is sufficient - env.step doesn't modify action in-place
-                next_state, reward, done, _ = env.step(action.numpy())
-
-                reward = torch.as_tensor(reward, dtype=torch.float)
-                memory.store(state, action, reward, value, done)
-                memory_full = len(memory) >= max_steps
-
-                state = torch.as_tensor(next_state, dtype=torch.float)
-                traj_len += 1
-
-            value = critic(state)
-            memory.finish_path(last_val=(not done) * value)
-
-        return memory.get_data()
-
     def sample_parallel_with_workers(self, deterministic=False):
         """Sample trajectories using persistent worker actors.
 
@@ -250,23 +205,6 @@ class PPO:
             w.sample.remote(self.gamma, self.lam, max_steps, self.max_traj_len, deterministic) for w in self.workers
         ]
         result = ray.get(sample_futures)
-
-        return self._aggregate_results(result)
-
-    def sample_parallel(self, *args, deterministic=False):
-        """Legacy sample_parallel for backward compatibility (e.g., evaluation).
-
-        This uses stateless Ray tasks which recreate environments each time.
-        For training, use sample_parallel_with_workers() instead.
-        """
-        max_steps = self.batch_size // self.n_proc
-        worker_args = (self.gamma, self.lam, self.iteration_count, max_steps, self.max_traj_len, deterministic)
-        args = args + worker_args
-
-        # Create pool of workers, each getting data for min_steps
-        worker = self.sample
-        workers = [worker.remote(*args) for _ in range(self.n_proc)]
-        result = ray.get(workers)
 
         return self._aggregate_results(result)
 
