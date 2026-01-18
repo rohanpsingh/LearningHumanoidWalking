@@ -232,25 +232,25 @@ class PPO:
 
         return self._aggregate_results(result)
 
-    def _aggregate_results(self, result) -> BatchData:
+    def _aggregate_results(self, result: list[BatchData]) -> BatchData:
         """Aggregate results from multiple workers into a single BatchData.
 
         Args:
-            result: List of dicts from worker sample() calls
+            result: List of BatchData from worker sample() calls
 
         Returns:
             BatchData with concatenated tensors from all workers
         """
         # Aggregate trajectory data - handle traj_idx specially for recurrent policies
         # (indices need to be offset to reference correct positions in concatenated data)
-        states = torch.cat([r["states"] for r in result])
-        actions = torch.cat([r["actions"] for r in result])
-        rewards = torch.cat([r["rewards"] for r in result])
-        values = torch.cat([r["values"] for r in result])
-        returns = torch.cat([r["returns"] for r in result])
-        dones = torch.cat([r["dones"] for r in result])
-        ep_lens = torch.cat([r["ep_lens"] for r in result])
-        ep_rewards = torch.cat([r["ep_rewards"] for r in result])
+        states = torch.cat([r.states for r in result])
+        actions = torch.cat([r.actions for r in result])
+        rewards = torch.cat([r.rewards for r in result])
+        values = torch.cat([r.values for r in result])
+        returns = torch.cat([r.returns for r in result])
+        dones = torch.cat([r.dones for r in result])
+        ep_lens = torch.cat([r.ep_lens for r in result])
+        ep_rewards = torch.cat([r.ep_rewards for r in result])
 
         # Fix traj_idx: offset each worker's indices by cumulative sample count
         if self.recurrent:
@@ -258,14 +258,14 @@ class PPO:
             offset = 0
             for r in result:
                 # Skip the first 0 from subsequent workers (it's redundant)
-                worker_traj_idx = r["traj_idx"]
+                worker_traj_idx = r.traj_idx
                 if offset > 0:
                     worker_traj_idx = worker_traj_idx[1:]  # Skip leading 0
                 traj_idx_list.append(worker_traj_idx + offset)
-                offset += len(r["states"])
+                offset += len(r.states)
             traj_idx = torch.cat(traj_idx_list)
         else:
-            traj_idx = torch.cat([r["traj_idx"] for r in result])
+            traj_idx = torch.cat([r.traj_idx for r in result])
 
         return BatchData(
             states=states,

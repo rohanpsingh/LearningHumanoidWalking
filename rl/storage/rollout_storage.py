@@ -82,26 +82,24 @@ class PPOBuffer:
 
         self.returns[self.traj_idx[-2] : self.traj_idx[-1], 0] = returns
 
-    def get_data(self, ep_lens=None, ep_rewards=None):
-        """
-        Return collected data and reset buffer.
+    def get_data(self, ep_lens=None, ep_rewards=None) -> BatchData:
+        """Return collected data as BatchData.
 
         Args:
             ep_lens: List of completed episode lengths (from worker)
             ep_rewards: List of completed episode rewards (from worker)
 
         Returns:
-            dict: Collected trajectory data
+            BatchData with collected trajectory data
         """
-        data = {
-            "states": self.states[: self.ptr],
-            "actions": self.actions[: self.ptr],
-            "rewards": self.rewards[: self.ptr],
-            "values": self.values[: self.ptr],
-            "returns": self.returns[: self.ptr],
-            "dones": self.dones[: self.ptr],
-            "traj_idx": torch.Tensor(self.traj_idx),
-            "ep_lens": torch.Tensor(ep_lens if ep_lens else []),
-            "ep_rewards": torch.Tensor(ep_rewards if ep_rewards else []),
-        }
-        return data
+        return BatchData(
+            states=self.states[: self.ptr],
+            actions=self.actions[: self.ptr],
+            rewards=self.rewards[: self.ptr],
+            values=self.values[: self.ptr],
+            returns=self.returns[: self.ptr],
+            dones=self.dones[: self.ptr],
+            traj_idx=torch.Tensor(self.traj_idx),
+            ep_lens=torch.Tensor(ep_lens if ep_lens else []),
+            ep_rewards=torch.Tensor(ep_rewards if ep_rewards else []),
+        )
