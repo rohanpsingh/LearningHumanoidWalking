@@ -69,6 +69,18 @@ class RolloutWorker:
         """Update iteration count for curriculum learning."""
         self.env.robot.iteration_count = iteration_count
 
+    def set_obs_normalization(self, obs_mean, obs_std):
+        """Update observation normalization params for policy and critic.
+
+        Args:
+            obs_mean: Mean tensor for observation normalization
+            obs_std: Std tensor for observation normalization
+        """
+        self.policy.obs_mean = obs_mean
+        self.policy.obs_std = obs_std
+        self.critic.obs_mean = obs_mean
+        self.critic.obs_std = obs_std
+
     @torch.no_grad()
     def sample(self, gamma, lam, max_steps, max_traj_len, deterministic=False):
         """Collect trajectory data using the persistent environment.
