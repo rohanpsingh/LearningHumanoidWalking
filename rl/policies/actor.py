@@ -9,7 +9,7 @@ class Actor(Net):
     def __init__(self):
         super().__init__()
 
-    def forward(self):
+    def forward(self, state, deterministic=True):
         raise NotImplementedError
 
 
@@ -44,7 +44,7 @@ class FF_Actor(Actor):
         self.action_dim = action_dim
         self.nonlinearity = nonlinearity
 
-        self.initialize_parameters()
+        self.init_parameters()
 
     def forward(self, state, deterministic=True):
         x = state
@@ -63,7 +63,7 @@ class LSTM_Actor(Actor):
         self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
         for i in range(len(layers) - 1):
             self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
-        self.network_out = nn.Linear(layers[i - 1], action_dim)
+        self.network_out = nn.Linear(layers[-1], action_dim)
 
         self.action_dim = action_dim
         self.init_hidden_state()
@@ -79,15 +79,21 @@ class LSTM_Actor(Actor):
 
         self.hidden, self.cells = data
 
-    def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
+    def _get_device(self):
+        """Get device from network parameters."""
+        return next(self.parameters()).device
+
+    def init_hidden_state(self, batch_size=1, device=None):
+        if device is None:
+            device = self._get_device()
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
 
     def forward(self, x, deterministic=True):
         dims = len(x.size())
 
         if dims == 3:  # if we get a batch of trajectories
-            self.init_hidden_state(batch_size=x.size(1))
+            self.init_hidden_state(batch_size=x.size(1), device=x.device)
             y = []
             for _t, x_t in enumerate(x):
                 for idx, layer in enumerate(self.actor_layers):
@@ -105,16 +111,15 @@ class LSTM_Actor(Actor):
                 h, c = self.hidden[idx], self.cells[idx]
                 self.hidden[idx], self.cells[idx] = layer(x, (h, c))
                 x = self.hidden[idx]
-            x = self.nonlinearity(self.network_out(x))
 
             if dims == 1:
                 x = x.view(-1)
 
-        action = self.network_out(x)
+        action = self.nonlinearity(self.network_out(x))
         return action
 
 
-class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conventions
+class Gaussian_FF_Actor(Actor):
     def __init__(
         self,
         state_dim,
@@ -144,21 +149,13 @@ class Gaussian_FF_Actor(Actor):  # more consistent with other actor naming conve
         self.state_dim = state_dim
         self.nonlinearity = nonlinearity
 
-        # Initialized to no input normalization, can be modified later
         self.obs_std = 1.0
         self.obs_mean = 0.0
 
-        # weight initialization scheme used in PPO paper experiments
-        self.normc_init = normc_init
-
         self.bounded = bounded
 
-        self.init_parameters()
-
-    def init_parameters(self):
-        if self.normc_init:
-            self.apply(normc_fn)
-            self.means.weight.data.mul_(0.01)
+        self.normc_init = normc_init
+        self.init_parameters(self.means)
 
     def _get_dist_params(self, state):
         state = (state - self.obs_mean) / self.obs_std
@@ -196,11 +193,12 @@ class Gaussian_LSTM_Actor(Actor):
         self,
         state_dim,
         action_dim,
-        layers=(128, 128),
+        layers=(256, 256),
         nonlinearity=F.tanh,
-        normc_init=False,
+        normc_init=True,
         init_std=0.2,
         learn_std=False,
+        bounded=False,
     ):
         super().__init__()
 
@@ -208,27 +206,29 @@ class Gaussian_LSTM_Actor(Actor):
         self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
         for i in range(len(layers) - 1):
             self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
-        self.network_out = nn.Linear(layers[i - 1], action_dim)
+        self.network_out = nn.Linear(layers[-1], action_dim)
 
         self.action_dim = action_dim
         self.state_dim = state_dim
         self.init_hidden_state()
         self.nonlinearity = nonlinearity
 
-        # Initialized to no input normalization, can be modified later
         self.obs_std = 1.0
         self.obs_mean = 0.0
-
         self.learn_std = learn_std
         if self.learn_std:
             self.stds = nn.Parameter(init_std * torch.ones(action_dim))
         else:
             self.stds = init_std * torch.ones(action_dim)
 
-        if normc_init:
-            self.initialize_parameters()
+        self.bounded = bounded
 
-        self.act = self.forward
+        self.normc_init = normc_init
+        self.init_parameters(self.network_out)
+
+    def _get_device(self):
+        """Get device from network parameters."""
+        return next(self.parameters()).device
 
     def _get_dist_params(self, state):
         state = (state - self.obs_mean) / self.obs_std
@@ -237,7 +237,7 @@ class Gaussian_LSTM_Actor(Actor):
 
         x = state
         if dims == 3:  # if we get a batch of trajectories
-            self.init_hidden_state(batch_size=x.size(1))
+            self.init_hidden_state(batch_size=x.size(1), device=x.device)
             y = []
             for _t, x_t in enumerate(x):
                 for idx, layer in enumerate(self.actor_layers):
@@ -260,12 +260,16 @@ class Gaussian_LSTM_Actor(Actor):
                 x = x.view(-1)
 
         mu = self.network_out(x)
+        if self.bounded:
+            mu = torch.tanh(mu)
         sd = self.stds
         return mu, sd
 
-    def init_hidden_state(self, batch_size=1):
-        self.hidden = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, layer.hidden_size) for layer in self.actor_layers]
+    def init_hidden_state(self, batch_size=1, device=None):
+        if device is None:
+            device = self._get_device()
+        self.hidden = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
+        self.cells = [torch.zeros(batch_size, layer.hidden_size, device=device) for layer in self.actor_layers]
 
     def forward(self, state, deterministic=True):
         mu, sd = self._get_dist_params(state)
@@ -280,15 +284,3 @@ class Gaussian_LSTM_Actor(Actor):
     def distribution(self, inputs):
         mu, sd = self._get_dist_params(inputs)
         return torch.distributions.Normal(mu, sd)
-
-
-# Initialization scheme for gaussian mlp (from ppo paper)
-# NOTE: the fact that this has the same name as a parameter caused a NASTY bug
-# apparently "if <function_name>" evaluates to True in python...
-def normc_fn(m):
-    classname = m.__class__.__name__
-    if classname.find("Linear") != -1:
-        m.weight.data.normal_(0, 1)
-        m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
-        if m.bias is not None:
-            m.bias.data.fill_(0)

@@ -28,6 +28,11 @@ class PPO:
         self.seed = seed
         self.gamma = args.gamma
         self.lr = args.lr
+        # LSTM networks have vanishing gradients in hidden layers (~100x smaller than FF)
+        # Use higher learning rate to compensate when using default lr
+        if args.recurrent and args.lr == 1e-4:
+            self.lr = 1e-3
+            print(f"Recurrent policy: using higher learning rate {self.lr} (override with --lr)")
         self.eps = args.eps
         self.ent_coeff = args.entropy_coeff
         self.clip = args.clip
@@ -57,8 +62,9 @@ class PPO:
         self.checkpointer = ModelCheckpointer(self.save_path)
 
         # create networks or load up pretrained
-        obs_dim = env_fn().observation_space.shape[0]
-        action_dim = env_fn().action_space.shape[0]
+        env_instance = env_fn()  # single env instance for initialization queries
+        obs_dim = env_instance.observation_space.shape[0]
+        action_dim = env_instance.action_space.shape[0]
         if args.continued:
             path_to_actor = args.continued
             path_to_critic = Path(args.continued.parent, "critic" + str(args.continued).split("actor")[1])
@@ -83,8 +89,7 @@ class PPO:
                 )
                 critic = FF_V(obs_dim)
 
-            # Setup observation normalization
-            env_instance = env_fn()
+            # Setup observation normalization (reuse env_instance from above)
             if hasattr(env_instance, "obs_mean") and hasattr(env_instance, "obs_std"):
                 # Use fixed normalization params from environment
                 obs_mean, obs_std = env_instance.obs_mean, env_instance.obs_std
@@ -97,7 +102,8 @@ class PPO:
                 print("Using running observation normalization (will update during training).")
 
             with torch.no_grad():
-                policy.obs_mean, policy.obs_std = map(torch.Tensor, (obs_mean, obs_std))
+                policy.obs_mean = torch.tensor(obs_mean, dtype=torch.float32)
+                policy.obs_std = torch.tensor(obs_std, dtype=torch.float32)
                 critic.obs_mean = policy.obs_mean
                 critic.obs_std = policy.obs_std
 
@@ -294,17 +300,36 @@ class PPO:
         # clipped surrogate loss
         cpi_loss = ratio * advantage_batch * mask
         clip_loss = ratio.clamp(1.0 - self.clip, 1.0 + self.clip) * advantage_batch * mask
-        actor_loss = -torch.min(cpi_loss, clip_loss).mean()
+        # For recurrent policies with padding, divide by number of real samples (mask.sum())
+        # not total positions (which includes padding)
+        if isinstance(mask, torch.Tensor):
+            num_valid = mask.sum()
+            actor_loss = -torch.min(cpi_loss, clip_loss).sum() / num_valid
+        else:
+            actor_loss = -torch.min(cpi_loss, clip_loss).mean()
 
         # only used for logging
         clip_fraction = torch.mean((torch.abs(ratio - 1) > self.clip).float()).item()
 
         # Value loss using the TD(gae_lambda) target
         values = self.critic(obs_batch)
-        critic_loss = F.mse_loss(return_batch, values)
+        # For recurrent policies, mask out padded positions from critic loss
+        if isinstance(mask, torch.Tensor):
+            value_error = (return_batch - values).pow(2) * mask
+            critic_loss = value_error.sum() / num_valid
+        else:
+            critic_loss = F.mse_loss(return_batch, values)
 
         # Entropy loss favor exploration
-        entropy_penalty = -(pdf.entropy() * mask).mean()
+        # For recurrent policies, we need to divide by action_dim to match FF behavior
+        # FF uses .mean() which divides by (batch * action_dim)
+        # Recurrent uses .sum() / num_valid which divides by (valid_timesteps * batch)
+        # To make them consistent, recurrent must also divide by action_dim
+        if isinstance(mask, torch.Tensor):
+            action_dim = pdf.mean.shape[-1]
+            entropy_penalty = -(pdf.entropy() * mask).sum() / (num_valid * action_dim)
+        else:
+            entropy_penalty = -(pdf.entropy() * mask).mean()
 
         # Mirror Symmetry Loss
         # Reuse mean from distribution instead of redundant forward pass
@@ -532,7 +557,7 @@ class PPO:
 
             sys.stdout.write("-" * 37 + "\n")
             sys.stdout.write(f"| {'Mean Eprew':>15} | {torch.mean(batch.ep_rewards):>15.5g} |\n")
-            sys.stdout.write(f"| {'Mean Eplen':>15} | {torch.mean(batch.ep_lens):>15.5g} |\n")
+            sys.stdout.write(f"| {'Mean Eplen':>15} | {torch.mean(batch.ep_lens.float()):>15.5g} |\n")
             sys.stdout.write(f"| {'Actor loss':>15} | {np.mean(actor_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Critic loss':>15} | {np.mean(critic_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Mirror loss':>15} | {np.mean(mirror_losses):>15.3g} |\n")
@@ -582,7 +607,7 @@ class PPO:
                 mirror_loss=np.mean(mirror_losses),
                 imitation_loss=np.mean(imitation_losses),
                 mean_reward=float(torch.mean(batch.ep_rewards)),
-                mean_ep_len=float(torch.mean(batch.ep_lens)),
+                mean_ep_len=float(torch.mean(batch.ep_lens.float())),
                 mean_noise_std=np.mean(action_noise),
                 step=itr,
             )
