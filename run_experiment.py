@@ -205,7 +205,17 @@ if __name__ == "__main__":
         parser.add_argument(
             "--ep-len", required=False, type=int, default=10, help="Episode length to play (in seconds)"
         )
+        parser.add_argument(
+            "--seed",
+            type=int,
+            default=None,
+            help="Random seed for reproducible evaluation",
+        )
         args = parser.parse_args()
+
+        # Apply global seeding before any randomness
+        if args.seed is not None:
+            set_global_seeds(args.seed, cuda_deterministic=True)
 
         # Determine path to actor
         path_to_actor = None
