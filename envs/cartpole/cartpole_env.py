@@ -6,24 +6,53 @@ Contains everything in one file: env, observation space, reward function.
 
 import os
 
-import mujoco
 import numpy as np
 
 from envs.common.mujoco_env import MujocoEnv
+from envs.common.robot_interface import RobotInterface
 
 # Path to the cartpole XML model
 CARTPOLE_XML = os.path.join(os.path.dirname(__file__), "cartpole.xml")
 
 
-class _MinimalRobot:
-    """Minimal robot interface for compatibility with training infrastructure."""
+class CartpoleRobot:
+    """Simple robot wrapper with PD control for cartpole."""
 
-    def __init__(self):
+    def __init__(self, interface: RobotInterface, control_dt: float, kp: float, kd: float):
+        self.interface = interface
+        self.control_dt = control_dt
+
+        # Frame skip (control_dt / sim_dt)
+        self.frame_skip = int(control_dt / interface.sim_dt())
+
+        # Set PD gains on interface
+        kp_arr = np.array([kp])
+        kd_arr = np.array([kd])
+        self.interface.set_pd_gains(kp_arr, kd_arr)
+
+        # For training infrastructure compatibility
         self.iteration_count = 0
+
+    def step(self, target_position: np.ndarray) -> None:
+        """Execute PD control loop for one control timestep.
+
+        Args:
+            target_position: Target cart position [-1, 1].
+        """
+        target = np.atleast_1d(target_position)
+        zero_vel = np.zeros_like(target)
+
+        for _ in range(self.frame_skip):
+            # Compute PD torque using interface
+            torque = self.interface.step_pd(target, zero_vel)
+
+            # Apply torque and step simulation
+            self.interface.set_motor_torque(torque)
+            self.interface.step()
 
 
 class CartpoleEnv(MujocoEnv):
-    """Simple cartpole swing-up environment.
+    """Simple cartpole swing-up environment with PD control.
 
     Observation (4-dim):
         - cart position
@@ -32,7 +61,7 @@ class CartpoleEnv(MujocoEnv):
         - pole angular velocity
 
     Action (1-dim):
-        - force applied to cart [-1, 1]
+        - target cart position [-1, 1]
 
     Reward:
         - upright bonus: cos(pole_angle)
@@ -46,27 +75,21 @@ class CartpoleEnv(MujocoEnv):
 
         super().__init__(CARTPOLE_XML, sim_dt, control_dt)
 
-        # Cache joint/actuator indices
-        self._slider_joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "slider")
-        self._hinge_joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "hinge")
-        self._actuator_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "slide")
+        # Create robot interface
+        self.interface = RobotInterface(self.model, self.data)
 
-        # Get qpos/qvel indices for joints
-        self._slider_qpos_idx = self.model.jnt_qposadr[self._slider_joint_id]
-        self._hinge_qpos_idx = self.model.jnt_qposadr[self._hinge_joint_id]
-        self._slider_qvel_idx = self.model.jnt_dofadr[self._slider_joint_id]
-        self._hinge_qvel_idx = self.model.jnt_dofadr[self._hinge_joint_id]
+        # Create robot with PD control
+        self.robot = CartpoleRobot(self.interface, control_dt, kp=10.0, kd=2.0)
+
+        # Cache qpos/qvel indices for observations
+        self._slider_qpos_idx = self.model.jnt_qposadr[self.model.joint("slider").id]
+        self._hinge_qpos_idx = self.model.jnt_qposadr[self.model.joint("hinge").id]
+        self._slider_qvel_idx = self.model.jnt_dofadr[self.model.joint("slider").id]
+        self._hinge_qvel_idx = self.model.jnt_dofadr[self.model.joint("hinge").id]
 
         # Observation and action spaces (as numpy arrays, matching project convention)
         self.observation_space = np.zeros(4)
         self.action_space = np.zeros(1)
-
-        # Minimal robot interface for training infrastructure compatibility
-        self.robot = _MinimalRobot()
-
-        # Observation normalization (mean, std)
-        self.obs_mean = np.zeros(4)
-        self.obs_std = np.array([1.0, np.pi, 2.0, 5.0])
 
     def reset_model(self):
         """Reset to random initial state with pole hanging down."""
@@ -91,15 +114,10 @@ class CartpoleEnv(MujocoEnv):
         return np.array([cart_pos, pole_angle, cart_vel, pole_vel])
 
     def step(self, action):
-        """Take one environment step."""
-        action = np.clip(action, -1.0, 1.0)
+        """Take one environment step with PD control."""
 
-        # Apply action
-        self.data.ctrl[self._actuator_id] = action[0]
-
-        # Step simulation
-        for _ in range(int(self.frame_skip)):
-            mujoco.mj_step(self.model, self.data)
+        # Execute robot step with PD control
+        self.robot.step(action)
 
         obs = self._get_obs()
         reward = self._compute_reward(obs, action)
