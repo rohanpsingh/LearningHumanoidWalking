@@ -233,7 +233,7 @@ if __name__ == "__main__":
             if latest_run is None:
                 raise Exception(f"No run directories found under: {args.logdir}")
             path_to_actor = Path(latest_run, "actor.pt")
-            print(f"Using most recent run: {latest_run}")
+            print(f"Loading model: {path_to_actor}")
         else:
             raise Exception("Must provide either --path or --logdir")
 
