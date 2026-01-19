@@ -29,6 +29,7 @@ python run_experiment.py eval --logdir <path_to_actor_pt>
 - `h1` - Basic standing task (H1 robot)
 - `jvrc_walk` - Basic walking task (JVRC robot)
 - `jvrc_step` - Stepping task using planned footsteps (JVRC robot)
+- `cartpole` - Minimal cartpole swing-up (example environment)
 
 ### Key Training Hyperparameters
 - `--n-itr`: Training iterations (default: 20000)

@@ -10,7 +10,12 @@ import torch
 class EvaluateEnv:
     def __init__(self, env, policy, args):
         self.env = env
-        self.policy = policy
+        # Move policy to CPU for evaluation
+        self.policy = policy.cpu()
+        if hasattr(self.policy, "obs_mean") and torch.is_tensor(self.policy.obs_mean):
+            self.policy.obs_mean = self.policy.obs_mean.cpu()
+        if hasattr(self.policy, "obs_std") and torch.is_tensor(self.policy.obs_std):
+            self.policy.obs_std = self.policy.obs_std.cpu()
         self.ep_len = args.ep_len
 
         if args.out_dir is None:
@@ -49,10 +54,7 @@ class EvaluateEnv:
 
             # forward pass and step
             obs_tensor = torch.tensor(observation, dtype=torch.float32)
-            # Move to same device as policy (handles GPU-trained models)
-            if hasattr(self.policy, "obs_mean") and self.policy.obs_mean is not None:
-                obs_tensor = obs_tensor.to(self.policy.obs_mean.device)
-            raw = self.policy.forward(obs_tensor, deterministic=True).detach().cpu().numpy()
+            raw = self.policy.forward(obs_tensor, deterministic=True).numpy()
             observation, _, done, _ = self.env.step(raw.copy())
 
             # render scene for video recording

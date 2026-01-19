@@ -68,6 +68,8 @@ def import_env(env_name_str):
         from envs.jvrc import JvrcStepEnv as Env
     elif env_name_str == "h1":
         from envs.h1 import H1Env as Env
+    elif env_name_str == "cartpole":
+        from envs.cartpole import CartpoleEnv as Env
     else:
         raise Exception("Check env name!")
     return Env
@@ -224,6 +226,9 @@ if __name__ == "__main__":
             print(f"Using most recent run: {latest_run}")
         else:
             raise Exception("Must provide either --path or --logdir")
+
+        # Set args.path for use in EvaluateEnv
+        args.path = path_to_actor
 
         path_to_critic = Path(path_to_actor.parent, "critic" + str(path_to_actor).split("actor")[1])
         path_to_pkl = Path(path_to_actor.parent, "experiment.pkl")
