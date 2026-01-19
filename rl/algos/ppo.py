@@ -28,6 +28,11 @@ class PPO:
         self.seed = seed
         self.gamma = args.gamma
         self.lr = args.lr
+        # LSTM networks have vanishing gradients in hidden layers (~100x smaller than FF)
+        # Use higher learning rate to compensate when using default lr
+        if args.recurrent and args.lr == 1e-4:
+            self.lr = 1e-3
+            print(f"Recurrent policy: using higher learning rate {self.lr} (override with --lr)")
         self.eps = args.eps
         self.ent_coeff = args.entropy_coeff
         self.clip = args.clip
@@ -295,17 +300,36 @@ class PPO:
         # clipped surrogate loss
         cpi_loss = ratio * advantage_batch * mask
         clip_loss = ratio.clamp(1.0 - self.clip, 1.0 + self.clip) * advantage_batch * mask
-        actor_loss = -torch.min(cpi_loss, clip_loss).mean()
+        # For recurrent policies with padding, divide by number of real samples (mask.sum())
+        # not total positions (which includes padding)
+        if isinstance(mask, torch.Tensor):
+            num_valid = mask.sum()
+            actor_loss = -torch.min(cpi_loss, clip_loss).sum() / num_valid
+        else:
+            actor_loss = -torch.min(cpi_loss, clip_loss).mean()
 
         # only used for logging
         clip_fraction = torch.mean((torch.abs(ratio - 1) > self.clip).float()).item()
 
         # Value loss using the TD(gae_lambda) target
         values = self.critic(obs_batch)
-        critic_loss = F.mse_loss(return_batch, values)
+        # For recurrent policies, mask out padded positions from critic loss
+        if isinstance(mask, torch.Tensor):
+            value_error = (return_batch - values).pow(2) * mask
+            critic_loss = value_error.sum() / num_valid
+        else:
+            critic_loss = F.mse_loss(return_batch, values)
 
         # Entropy loss favor exploration
-        entropy_penalty = -(pdf.entropy() * mask).mean()
+        # For recurrent policies, we need to divide by action_dim to match FF behavior
+        # FF uses .mean() which divides by (batch * action_dim)
+        # Recurrent uses .sum() / num_valid which divides by (valid_timesteps * batch)
+        # To make them consistent, recurrent must also divide by action_dim
+        if isinstance(mask, torch.Tensor):
+            action_dim = pdf.mean.shape[-1]
+            entropy_penalty = -(pdf.entropy() * mask).sum() / (num_valid * action_dim)
+        else:
+            entropy_penalty = -(pdf.entropy() * mask).mean()
 
         # Mirror Symmetry Loss
         # Reuse mean from distribution instead of redundant forward pass
