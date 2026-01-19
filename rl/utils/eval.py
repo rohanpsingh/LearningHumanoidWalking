@@ -16,6 +16,9 @@ class EvaluateEnv:
             self.policy.obs_mean = self.policy.obs_mean.cpu()
         if hasattr(self.policy, "obs_std") and torch.is_tensor(self.policy.obs_std):
             self.policy.obs_std = self.policy.obs_std.cpu()
+        # Reset LSTM hidden state for batch_size=1
+        if hasattr(self.policy, "init_hidden_state"):
+            self.policy.init_hidden_state(batch_size=1)
         self.ep_len = args.ep_len
 
         if args.out_dir is None:
@@ -68,6 +71,8 @@ class EvaluateEnv:
 
             if done and reset_counter < 3:
                 observation = self.env.reset()
+                if hasattr(self.policy, "init_hidden_state"):
+                    self.policy.init_hidden_state(batch_size=1)
                 reset_counter += 1
 
             time_until_next_step = max(
