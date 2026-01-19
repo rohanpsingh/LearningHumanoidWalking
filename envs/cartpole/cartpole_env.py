@@ -137,7 +137,7 @@ class CartpoleEnv(MujocoEnv):
         center_reward = np.exp(-1.0 * cart_pos**2)
 
         # Action reward: 1 when no action, decays with larger actions
-        action_reward = np.exp(-2.0 * np.sum(action**2))
+        action_reward = np.exp(-10.0 * np.sum(action**2))
 
         # Weighted sum (weights sum to 1 so total is in [0, 1])
         return 0.7 * upright_reward + 0.1 * center_reward + 0.2 * action_reward
