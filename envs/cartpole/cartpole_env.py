@@ -107,7 +107,7 @@ class CartpoleEnv(MujocoEnv):
     def _get_obs(self):
         """Get current observation."""
         cart_pos = self.data.qpos[self._slider_qpos_idx]
-        pole_angle = self.data.qpos[self._hinge_qpos_idx]
+        pole_angle = self.data.qpos[self._hinge_qpos_idx] % (2 * np.pi)
         cart_vel = self.data.qvel[self._slider_qvel_idx]
         pole_vel = self.data.qvel[self._hinge_qvel_idx]
 
@@ -126,27 +126,24 @@ class CartpoleEnv(MujocoEnv):
         return obs, float(reward), float(done), {}
 
     def _compute_reward(self, obs, action):
-        """Compute reward: upright bonus - torque penalty."""
+        """Compute reward for swing-up task. Total reward in [0, 1]."""
+        cart_pos = obs[0]
         pole_angle = obs[1]
 
-        # Upright reward: +1 when upright, -1 when hanging down
-        upright_reward = np.cos(pole_angle)
+        # Upright reward: 1 when upright (angle=0), decays as pole deviates
+        upright_reward = np.exp(-2.0 * pole_angle**2)
 
-        # Torque penalty
-        torque_penalty = 0.01 * np.sum(action**2)
+        # Center reward: 1 when at center, decays as cart moves away
+        center_reward = np.exp(-1.0 * cart_pos**2)
 
-        return upright_reward - torque_penalty
+        # Action reward: 1 when no action, decays with larger actions
+        action_reward = np.exp(-2.0 * np.sum(action**2))
+
+        # Weighted sum (weights sum to 1 so total is in [0, 1])
+        return 0.7 * upright_reward + 0.1 * center_reward + 0.2 * action_reward
 
     def _check_termination(self, obs):
         """Check if episode should terminate."""
         cart_pos = obs[0]
         # Terminate if cart goes out of bounds
         return np.abs(cart_pos) > 0.95
-
-    def viewer_setup(self):
-        """Setup viewer camera."""
-        with self.viewer.lock():
-            self.viewer.cam.trackbodyid = 0
-            self.viewer.cam.distance = 4.0
-            self.viewer.cam.lookat[2] = 0.5
-            self.viewer.cam.elevation = -20
