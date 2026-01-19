@@ -97,7 +97,8 @@ class PPO:
                 print("Using running observation normalization (will update during training).")
 
             with torch.no_grad():
-                policy.obs_mean, policy.obs_std = map(torch.tensor, (obs_mean, obs_std))
+                policy.obs_mean = torch.tensor(obs_mean, dtype=torch.float32)
+                policy.obs_std = torch.tensor(obs_std, dtype=torch.float32)
                 critic.obs_mean = policy.obs_mean
                 critic.obs_std = policy.obs_std
 
@@ -532,7 +533,7 @@ class PPO:
 
             sys.stdout.write("-" * 37 + "\n")
             sys.stdout.write(f"| {'Mean Eprew':>15} | {torch.mean(batch.ep_rewards):>15.5g} |\n")
-            sys.stdout.write(f"| {'Mean Eplen':>15} | {torch.mean(batch.ep_lens):>15.5g} |\n")
+            sys.stdout.write(f"| {'Mean Eplen':>15} | {torch.mean(batch.ep_lens.float()):>15.5g} |\n")
             sys.stdout.write(f"| {'Actor loss':>15} | {np.mean(actor_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Critic loss':>15} | {np.mean(critic_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Mirror loss':>15} | {np.mean(mirror_losses):>15.3g} |\n")
@@ -582,7 +583,7 @@ class PPO:
                 mirror_loss=np.mean(mirror_losses),
                 imitation_loss=np.mean(imitation_losses),
                 mean_reward=float(torch.mean(batch.ep_rewards)),
-                mean_ep_len=float(torch.mean(batch.ep_lens)),
+                mean_ep_len=float(torch.mean(batch.ep_lens.float())),
                 mean_noise_std=np.mean(action_noise),
                 step=itr,
             )
