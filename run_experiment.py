@@ -61,6 +61,29 @@ def get_latest_run_dir(logdir):
     return subdirs[0]
 
 
+def get_latest_actor(run_dir):
+    """Find the latest actor checkpoint in a run directory.
+
+    Looks for actor_*.pt files and returns the one with highest iteration number.
+    Falls back to actor.pt if no numbered checkpoints exist.
+    """
+    import re
+
+    run_dir = Path(run_dir)
+    actor_files = list(run_dir.glob("actor_*.pt"))
+
+    if not actor_files:
+        # Fall back to actor.pt
+        return run_dir / "actor.pt"
+
+    # Extract iteration numbers and find max
+    def get_iter(f):
+        match = re.search(r"actor_(\d+)\.pt$", f.name)
+        return int(match.group(1)) if match else -1
+
+    return max(actor_files, key=get_iter)
+
+
 def import_env(env_name_str):
     if env_name_str == "jvrc_walk":
         from envs.jvrc import JvrcWalkEnv as Env
@@ -133,7 +156,7 @@ if __name__ == "__main__":
         parser.add_argument("--logdir", default=Path("/tmp/logs"), type=Path, help="Path to save weights and logs")
         parser.add_argument("--input-norm-steps", type=int, default=100000)
         parser.add_argument("--n-itr", type=int, default=20000, help="Number of iterations of the learning algorithm")
-        parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate")  # Xie
+        parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate")
         parser.add_argument("--eps", type=float, default=1e-5, help="Adam epsilon (for numerical stability)")
         parser.add_argument("--gamma", type=float, default=0.99, help="MDP discount")
         parser.add_argument("--std-dev", type=float, default=0.223, help="Action noise for exploration")
@@ -141,7 +164,7 @@ if __name__ == "__main__":
         parser.add_argument("--entropy-coeff", type=float, default=0.0, help="Coefficient for entropy regularization")
         parser.add_argument("--clip", type=float, default=0.2, help="Clipping parameter for PPO surrogate loss")
         parser.add_argument("--minibatch-size", type=int, default=64, help="Batch size for PPO updates")
-        parser.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs per PPO update")  # Xie
+        parser.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs per PPO update")
         parser.add_argument("--num-procs", type=int, default=12, help="Number of threads to train on")
         parser.add_argument("--max-grad-norm", type=float, default=0.05, help="Value to clip gradients at")
         parser.add_argument("--max-traj-len", type=int, default=400, help="Max episode horizon")
@@ -224,7 +247,7 @@ if __name__ == "__main__":
             if args.path.is_file() and args.path.suffix == ".pt":
                 path_to_actor = args.path
             elif args.path.is_dir():
-                path_to_actor = Path(args.path, "actor.pt")
+                path_to_actor = get_latest_actor(args.path)
             else:
                 raise Exception("Invalid path to actor module: ", args.path)
         elif args.logdir is not None:
@@ -232,10 +255,10 @@ if __name__ == "__main__":
             latest_run = get_latest_run_dir(args.logdir)
             if latest_run is None:
                 raise Exception(f"No run directories found under: {args.logdir}")
-            path_to_actor = Path(latest_run, "actor.pt")
-            print(f"Loading model: {path_to_actor}")
+            path_to_actor = get_latest_actor(latest_run)
         else:
             raise Exception("Must provide either --path or --logdir")
+        print(f"Loading model: {path_to_actor}")
 
         # Set args.path for use in EvaluateEnv
         args.path = path_to_actor
