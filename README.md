@@ -55,6 +55,7 @@ Environment names supported:
 | Basic Standing Task   | 'h1' |
 | Basic Walking Task   | 'jvrc_walk' |
 | Stepping Task (using footsteps)  | 'jvrc_step' |
+| Cartpole swing-up  | 'cartpole' |
 
 
 #### **To train:**
@@ -72,6 +73,14 @@ $ uv run run_experiment.py eval --logdir <path_to_actor_pt>
 ```
 
 Or, we could write a rollout script specific to each environment.
+
+#### **Cartpole**
+
+A minimal swing-up task for testing the RL pipeline. The goal is to swing the pole from hanging down to balancing upright.
+
+```
+$ uv run run_experiment.py train --env cartpole --n-itr 500 --gamma 0.95 --std-dev 0.15 --learn-std
+```
 
 ## Configuration
 
