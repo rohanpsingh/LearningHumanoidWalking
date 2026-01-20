@@ -70,8 +70,8 @@ class CartpoleEnv(MujocoEnv):
 
     def __init__(self, path_to_yaml=None):
         # Simulation parameters
-        sim_dt = 0.01  # Physics timestep
-        control_dt = 0.04  # Control timestep (4x frame skip)
+        sim_dt = 0.005  # Physics timestep
+        control_dt = 0.02  # Control timestep
 
         super().__init__(CARTPOLE_XML, sim_dt, control_dt)
 
@@ -79,7 +79,7 @@ class CartpoleEnv(MujocoEnv):
         self.interface = RobotInterface(self.model, self.data)
 
         # Create robot with PD control
-        self.robot = CartpoleRobot(self.interface, control_dt, kp=10.0, kd=2.0)
+        self.robot = CartpoleRobot(self.interface, control_dt, kp=100.0, kd=10.0)
 
         # Cache qpos/qvel indices for observations
         self._slider_qpos_idx = self.model.jnt_qposadr[self.model.joint("slider").id]
@@ -93,8 +93,9 @@ class CartpoleEnv(MujocoEnv):
 
     def reset_model(self):
         """Reset to random initial state with pole hanging down."""
-        # Start with pole hanging down (angle ~pi) with small noise
-        qpos = np.array([0.0, np.pi])  # cart at center, pole hanging down
+        # Start with pole at random position
+        pole_init = np.random.uniform(-np.pi, np.pi)
+        qpos = np.array([0.0, pole_init])
         qvel = np.array([0.0, 0.0])
 
         # Add small random perturbation
@@ -129,21 +130,25 @@ class CartpoleEnv(MujocoEnv):
         """Compute reward for swing-up task. Total reward in [0, 1]."""
         cart_pos = obs[0]
         pole_angle = obs[1]
+        pole_vel = obs[3]
 
-        # Upright reward: 1 when upright (angle=0), decays as pole deviates
-        upright_reward = np.exp(-2.0 * pole_angle**2)
+        # upright error
+        upright_error = 1 - np.cos(pole_angle)
+        upright_reward = np.exp(-2.0 * upright_error**2)
 
         # Center reward: 1 when at center, decays as cart moves away
         center_reward = np.exp(-1.0 * cart_pos**2)
 
-        # Action reward: 1 when no action, decays with larger actions
-        action_reward = np.exp(-10.0 * np.sum(action**2))
+        # velocity error
+        vel_reward = np.exp(-0.01 * pole_vel**2)
 
-        # Weighted sum (weights sum to 1 so total is in [0, 1])
-        return 0.7 * upright_reward + 0.1 * center_reward + 0.2 * action_reward
+        # Action penalty
+        action_reward = np.exp(-0.5 * np.sum(action**2))
+
+        return 0.7 * upright_reward + 0.1 * vel_reward + 0.1 * action_reward + 0.1 * center_reward
 
     def _check_termination(self, obs):
         """Check if episode should terminate."""
         cart_pos = obs[0]
         # Terminate if cart goes out of bounds
-        return np.abs(cart_pos) > 0.95
+        return np.abs(cart_pos) > 0.99

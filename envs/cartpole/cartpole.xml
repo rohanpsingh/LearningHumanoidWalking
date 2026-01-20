@@ -51,16 +51,10 @@ Actuators (name/actuator/parameter):
         <site type='sphere' size='.01' name='tip' pos='.001 0 .6'/>
       </body>
     </body>
-    <body name='mocap1' pos='1 0 0.5' mocap='true'>
-      <geom name='mocap_cube' type='box' size='0.05 0.05 0.05' rgba='1 0 0 0.5'/>
-    </body>
-    <body name='mocap2' pos='-1 0 0.5' mocap='true'>
-      <geom name='mocap_sphere' type='sphere' size='0.05' rgba='0 1 0 0.5'/>
-    </body>
   </worldbody>
 
   <actuator>
-    <motor name='slide' joint='slider' gear='50' ctrllimited='true' ctrlrange='-1 1' />
+    <motor name='slide' joint='slider' gear='50' ctrllimited='false' />
   </actuator>
 
   <sensor>
