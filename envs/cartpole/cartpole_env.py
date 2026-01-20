@@ -51,6 +51,13 @@ class CartpoleRobot:
             self.interface.step()
 
 
+class CartpoleTask:
+    """Minimal task class for cartpole (swing-up)."""
+
+    def reset(self, iter_count=0):
+        pass
+
+
 class CartpoleEnv(MujocoEnv):
     """Simple cartpole swing-up environment with PD control.
 
@@ -80,6 +87,9 @@ class CartpoleEnv(MujocoEnv):
 
         # Create robot with PD control
         self.robot = CartpoleRobot(self.interface, control_dt, kp=100.0, kd=10.0)
+
+        # Task (for interface compatibility)
+        self.task = CartpoleTask()
 
         # Cache qpos/qvel indices for observations
         self._slider_qpos_idx = self.model.jnt_qposadr[self.model.joint("slider").id]
@@ -121,31 +131,36 @@ class CartpoleEnv(MujocoEnv):
         self.robot.step(action)
 
         obs = self._get_obs()
-        reward = self._compute_reward(obs, action)
+        rewards = self._compute_reward(obs, action)
         done = self._check_termination(obs)
 
-        return obs, float(reward), float(done), {}
+        return obs, sum(rewards.values()), bool(done), rewards
 
     def _compute_reward(self, obs, action):
-        """Compute reward for swing-up task. Total reward in [0, 1]."""
+        """Compute reward for swing-up task. Returns dict of components."""
         cart_pos = obs[0]
         pole_angle = obs[1]
         pole_vel = obs[3]
 
         # upright error
         upright_error = 1 - np.cos(pole_angle)
-        upright_reward = np.exp(-2.0 * upright_error**2)
+        upright_reward = 0.7 * np.exp(-2.0 * upright_error**2)
 
         # Center reward: 1 when at center, decays as cart moves away
-        center_reward = np.exp(-1.0 * cart_pos**2)
+        center_reward = 0.1 * np.exp(-1.0 * cart_pos**2)
 
         # velocity error
-        vel_reward = np.exp(-0.01 * pole_vel**2)
+        vel_reward = 0.1 * np.exp(-0.01 * pole_vel**2)
 
         # Action penalty
-        action_reward = np.exp(-0.5 * np.sum(action**2))
+        action_reward = 0.1 * np.exp(-0.5 * np.sum(action**2))
 
-        return 0.7 * upright_reward + 0.1 * vel_reward + 0.1 * action_reward + 0.1 * center_reward
+        return {
+            "upright": upright_reward,
+            "center": center_reward,
+            "velocity": vel_reward,
+            "action": action_reward,
+        }
 
     def _check_termination(self, obs):
         """Check if episode should terminate."""
