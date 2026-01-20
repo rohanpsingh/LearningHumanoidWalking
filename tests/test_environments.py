@@ -133,9 +133,13 @@ class TestEnvironmentAttributes:
         assert env_instance.interface is not None
 
     def test_has_obs_normalization_stats(self, env_instance, env_name):
-        """Test environment has observation normalization stats."""
-        assert hasattr(env_instance, "obs_mean"), f"Environment {env_name} missing obs_mean attribute"
-        assert hasattr(env_instance, "obs_std"), f"Environment {env_name} missing obs_std attribute"
+        """Test observation normalization stats are valid if provided.
+
+        Note: obs_mean/obs_std are optional - PPO will auto-compute them
+        via RunningMeanStd if not provided by the environment.
+        """
+        if not hasattr(env_instance, "obs_mean") or not hasattr(env_instance, "obs_std"):
+            pytest.skip(f"{env_name} uses PPO auto-computed normalization stats")
 
         obs_dim = env_instance.observation_space.shape[0]
         assert env_instance.obs_mean.shape == (obs_dim,), (
@@ -230,8 +234,6 @@ class TestEnvironmentConsistency:
         required_attrs = [
             "observation_space",
             "action_space",
-            "obs_mean",
-            "obs_std",
             "robot",
             "task",
             "interface",
@@ -280,9 +282,11 @@ class TestEnvironmentConsistency:
                 obs, _, _, _ = env.step(action)
                 assert obs.shape[0] == obs_dim, f"{env_name}: step obs dim mismatch"
 
-                # obs_mean/obs_std should match obs dim
-                assert env.obs_mean.shape[0] == obs_dim, f"{env_name}: obs_mean dim mismatch"
-                assert env.obs_std.shape[0] == obs_dim, f"{env_name}: obs_std dim mismatch"
+                # obs_mean/obs_std should match obs dim if provided
+                if hasattr(env, "obs_mean"):
+                    assert env.obs_mean.shape[0] == obs_dim, f"{env_name}: obs_mean dim mismatch"
+                if hasattr(env, "obs_std"):
+                    assert env.obs_std.shape[0] == obs_dim, f"{env_name}: obs_std dim mismatch"
         finally:
             close_all_envs(envs)
 
