@@ -174,6 +174,7 @@ if __name__ == "__main__":
             "--eval-freq", required=False, default=100, type=int, help="Frequency of performing evaluation"
         )
         parser.add_argument("--continued", required=False, type=Path, help="path to pretrained weights")
+        parser.add_argument("--hidden-size", type=int, default=256, help="Hidden layer size for actor/critic networks")
         parser.add_argument("--recurrent", required=False, action="store_true", help="use LSTM instead of FF")
         parser.add_argument("--imitate", required=False, type=str, default=None, help="Policy to imitate")
         parser.add_argument(

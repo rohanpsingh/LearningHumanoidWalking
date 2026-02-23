@@ -45,6 +45,7 @@ class PPO:
         self.eval_freq = args.eval_freq
         self.recurrent = args.recurrent
         self.imitate_coeff = args.imitate_coeff
+        self.hidden_size = getattr(args, "hidden_size", 256)
 
         # batch_size depends on number of parallel envs
         self.batch_size = self.n_proc * self.max_traj_len
@@ -80,14 +81,17 @@ class PPO:
             # Pretrained models already have obs normalization embedded
             self.obs_rms = None
         else:
+            layers = (self.hidden_size, self.hidden_size)
             if args.recurrent:
-                policy = Gaussian_LSTM_Actor(obs_dim, action_dim, init_std=args.std_dev, learn_std=args.learn_std)
-                critic = LSTM_V(obs_dim)
+                policy = Gaussian_LSTM_Actor(
+                    obs_dim, action_dim, layers=layers, init_std=args.std_dev, learn_std=args.learn_std
+                )
+                critic = LSTM_V(obs_dim, layers=layers)
             else:
                 policy = Gaussian_FF_Actor(
-                    obs_dim, action_dim, init_std=args.std_dev, learn_std=args.learn_std, bounded=False
+                    obs_dim, action_dim, layers=layers, init_std=args.std_dev, learn_std=args.learn_std, bounded=False
                 )
-                critic = FF_V(obs_dim)
+                critic = FF_V(obs_dim, layers=layers)
 
             # Setup observation normalization (reuse env_instance from above)
             if hasattr(env_instance, "obs_mean") and hasattr(env_instance, "obs_std"):
