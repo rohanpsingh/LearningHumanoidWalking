@@ -23,7 +23,7 @@ class BatchData:
 
 
 class PPOBuffer:
-    def __init__(self, obs_len=1, act_len=1, gamma=0.99, size=1):
+    def __init__(self, obs_len=1, act_len=1, gamma=0.99, lam=0.95, size=1):
         self.states = torch.zeros(size, obs_len, dtype=float)
         self.actions = torch.zeros(size, act_len, dtype=float)
         self.rewards = torch.zeros(size, 1, dtype=float)
@@ -32,6 +32,7 @@ class PPOBuffer:
         self.dones = torch.zeros(size, 1, dtype=float)
 
         self.gamma = gamma
+        self.lam = lam
         self.ptr = 0
         self.traj_idx = [0]
 
@@ -50,37 +51,43 @@ class PPOBuffer:
         self.ptr += 1
 
     def finish_path(self, last_val=None):
-        """Finish a trajectory and compute returns.
+        """Finish a trajectory and compute GAE λ-returns.
+
+        Uses Generalized Advantage Estimation:
+            δ_t = r_t + γ*V(s_{t+1}) - V(s_t)
+            A_t = δ_t + (γλ)*δ_{t+1} + (γλ)²*δ_{t+2} + ...
+            returns_t = A_t + V(s_t)
 
         Args:
             last_val: Bootstrap value for return computation (0 if truly done)
         """
         self.traj_idx += [self.ptr]
-        rewards = self.rewards[self.traj_idx[-2] : self.traj_idx[-1], 0]
+        start = self.traj_idx[-2]
+        end = self.traj_idx[-1]
+        rewards = self.rewards[start:end, 0]
+        values = self.values[start:end, 0]
         T = len(rewards)
 
         if T == 0:
             return
 
-        # Vectorized discounted returns computation
-        # Append last_val to rewards for unified computation
         last_val_scalar = last_val.squeeze(0) if last_val.dim() > 0 else last_val
-        extended_rewards = torch.cat([rewards, last_val_scalar.unsqueeze(0)])
 
-        # Compute discount powers: [1, γ, γ², ..., γ^T]
-        discount_powers = self.gamma ** torch.arange(T + 1, dtype=rewards.dtype, device=rewards.device)
+        # Compute TD residuals: δ_t = r_t + γ*V(s_{t+1}) - V(s_t)
+        # Append bootstrap value for V(s_T)
+        next_values = torch.cat([values[1:], last_val_scalar.unsqueeze(0)])
+        deltas = rewards + self.gamma * next_values - values
 
-        # Weight rewards by discount powers
-        weighted = extended_rewards * discount_powers
+        # Compute GAE advantages via reverse accumulation:
+        # A_t = δ_t + (γλ)*A_{t+1}
+        gae = torch.zeros_like(rewards)
+        running_gae = 0.0
+        for t in reversed(range(T)):
+            running_gae = deltas[t] + self.gamma * self.lam * running_gae
+            gae[t] = running_gae
 
-        # Reverse cumsum: at position i, gives sum_{j=i}^{T} γ^j * r_j
-        rev_cumsum = weighted.flip(0).cumsum(0).flip(0)
-
-        # Divide by position discount to get actual returns
-        # returns[i] = sum_{j=i}^{T} γ^(j-i) * r_j
-        returns = rev_cumsum[:-1] / discount_powers[:-1]
-
-        self.returns[self.traj_idx[-2] : self.traj_idx[-1], 0] = returns
+        # Returns = advantages + values
+        self.returns[start:end, 0] = gae + values
 
     def get_data(self, ep_lens=None, ep_rewards=None) -> BatchData:
         """Return collected data as BatchData.

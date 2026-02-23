@@ -159,6 +159,7 @@ if __name__ == "__main__":
         parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate")
         parser.add_argument("--eps", type=float, default=1e-5, help="Adam epsilon (for numerical stability)")
         parser.add_argument("--gamma", type=float, default=0.99, help="MDP discount")
+        parser.add_argument("--lam", type=float, default=0.95, help="GAE lambda for advantage estimation")
         parser.add_argument("--std-dev", type=float, default=0.223, help="Action noise for exploration")
         parser.add_argument("--learn-std", action="store_true", help="Exploration noise will be learned")
         parser.add_argument("--entropy-coeff", type=float, default=0.0, help="Coefficient for entropy regularization")
