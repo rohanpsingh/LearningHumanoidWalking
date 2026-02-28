@@ -38,6 +38,7 @@ python run_experiment.py eval --logdir <path_to_actor_pt>
 - `--lam`: GAE discount (default: 0.95)
 - `--clip`: PPO clipping (default: 0.2)
 - `--epochs`: Optimization epochs per update (default: 3)
+- `--steps-per-worker`: Timesteps each worker collects per iteration (default: 1024)
 - `--max-traj-len`: Episode horizon (default: 400)
 
 ## Architecture

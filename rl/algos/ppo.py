@@ -48,8 +48,7 @@ class PPO:
         self.imitate_coeff = args.imitate_coeff
         self.hidden_size = getattr(args, "hidden_size", 256)
 
-        # batch_size depends on number of parallel envs
-        self.batch_size = self.n_proc * self.max_traj_len
+        self.steps_per_worker = args.steps_per_worker
 
         self.total_steps = 0
 
@@ -212,7 +211,7 @@ class PPO:
         This method uses pre-created Ray actors that maintain persistent environments,
         avoiding the expensive environment recreation that happens with stateless tasks.
         """
-        max_steps = self.batch_size // self.n_proc
+        max_steps = self.steps_per_worker
 
         # Get state dicts and obs normalization, move to CPU for workers
         # (Workers always run on CPU, even if main process is on GPU)

@@ -38,6 +38,7 @@ def print_system_info(args, training=True):
         print(f"Num processes: {args.num_procs}")
         print(f"Learning rate: {args.lr}")
         print(f"Max trajectory length: {args.max_traj_len}")
+        print(f"Steps per worker: {args.steps_per_worker}")
         print(f"Iterations: {args.n_itr}")
         if hasattr(args, "seed") and args.seed is not None:
             print(f"Seed: {args.seed} (deterministic)")
@@ -169,6 +170,7 @@ if __name__ == "__main__":
         parser.add_argument("--num-procs", type=int, default=12, help="Number of threads to train on")
         parser.add_argument("--max-grad-norm", type=float, default=0.05, help="Value to clip gradients at")
         parser.add_argument("--max-traj-len", type=int, default=400, help="Max episode horizon")
+        parser.add_argument("--steps-per-worker", type=int, default=1024, help="Steps per worker per iteration")
         parser.add_argument("--no-mirror", required=False, action="store_true", help="to use SymmetricEnv")
         parser.add_argument("--mirror-coeff", required=False, default=0.4, type=float, help="weight for mirror loss")
         parser.add_argument(
