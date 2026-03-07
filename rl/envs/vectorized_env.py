@@ -94,8 +94,9 @@ class VectorizedEnv:
         for _i, (env, action) in enumerate(zip(self.envs, actions, strict=False)):
             obs, reward, done, info = env.step(action)
 
-            # Auto-reset on episode termination
+            # Auto-reset on episode termination, preserving terminal obs
             if done:
+                info["terminal_observation"] = obs
                 obs = env.reset()
 
             obs_list.append(obs)
