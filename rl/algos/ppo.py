@@ -195,7 +195,7 @@ class PPO:
                 seed=get_worker_seed(self.seed, i) if self.seed is not None else None,
                 worker_id=i,
             )
-            for i in range(self.n_proc)
+            for i in range(self.num_workers)
         ]
         print("Workers created successfully.")
 
