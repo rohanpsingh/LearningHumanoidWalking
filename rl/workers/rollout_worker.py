@@ -251,7 +251,7 @@ class RolloutWorker:
             values = critic(states)  # [num_envs, 1]
 
             # Step all environments
-            next_states, rewards, dones, _ = vec_env.step(actions)
+            next_states, rewards, dones, infos = vec_env.step(actions)
 
             # Convert to tensors
             next_states = torch.as_tensor(next_states, dtype=torch.float)
@@ -270,8 +270,12 @@ class RolloutWorker:
 
                 # Finish trajectory if done or max length reached
                 if dones[i] or traj_lens[i] >= max_traj_len:
-                    # Compute final value for bootstrapping
-                    final_value = critic(next_states[i].unsqueeze(0)).squeeze(0)
+                    # Use terminal observation for bootstrapping (not the auto-reset obs)
+                    if dones[i] and "terminal_observation" in infos[i]:
+                        terminal_obs = torch.as_tensor(infos[i]["terminal_observation"], dtype=torch.float)
+                        final_value = critic(terminal_obs.unsqueeze(0)).squeeze(0)
+                    else:
+                        final_value = critic(next_states[i].unsqueeze(0)).squeeze(0)
                     # Bootstrap with final value if not done (truncated episode)
                     buffers[i].finish_path(last_val=(not dones[i]) * final_value)
                     traj_lens[i] = 0
