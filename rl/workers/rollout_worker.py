@@ -12,7 +12,7 @@ import ray
 import torch
 
 from rl.envs.vectorized_env import VectorizedEnv
-from rl.storage.rollout_storage import PPOBuffer
+from rl.storage.rollout_storage import BatchData, PPOBuffer
 from rl.utils.seeding import set_global_seeds
 
 
@@ -303,39 +303,39 @@ class RolloutWorker:
         return self._aggregate_buffers(buffers)
 
     def _aggregate_buffers(self, buffers):
-        """Aggregate multiple PPOBuffer instances into a single data dictionary.
+        """Aggregate multiple PPOBuffer instances into a single BatchData.
 
         Args:
             buffers: List of PPOBuffer instances
 
         Returns:
-            dict: Aggregated trajectory data
+            BatchData: Aggregated trajectory data
         """
         # Get data from all buffers
         buffer_data = [buf.get_data() for buf in buffers]
-
-        # Standard data keys to concatenate
-        data_keys = ["states", "actions", "rewards", "values", "returns", "dones"]
-        aggregated_data = {k: torch.cat([d[k] for d in buffer_data]) for k in data_keys}
-
-        # Concatenate episode metrics
-        aggregated_data["ep_lens"] = torch.cat([d["ep_lens"] for d in buffer_data])
-        aggregated_data["ep_rewards"] = torch.cat([d["ep_rewards"] for d in buffer_data])
 
         # Fix traj_idx: offset each buffer's indices by cumulative sample count
         traj_idx_list = []
         offset = 0
         for data in buffer_data:
-            worker_traj_idx = data["traj_idx"]
+            worker_traj_idx = data.traj_idx
             # Skip the first 0 from subsequent buffers (it's redundant)
             if offset > 0:
                 worker_traj_idx = worker_traj_idx[1:]
             traj_idx_list.append(worker_traj_idx + offset)
-            offset += len(data["states"])
+            offset += len(data.states)
 
-        aggregated_data["traj_idx"] = torch.cat(traj_idx_list)
-
-        return aggregated_data
+        return BatchData(
+            states=torch.cat([d.states for d in buffer_data]),
+            actions=torch.cat([d.actions for d in buffer_data]),
+            rewards=torch.cat([d.rewards for d in buffer_data]),
+            values=torch.cat([d.values for d in buffer_data]),
+            returns=torch.cat([d.returns for d in buffer_data]),
+            dones=torch.cat([d.dones for d in buffer_data]),
+            traj_idx=torch.cat(traj_idx_list),
+            ep_lens=torch.cat([d.ep_lens for d in buffer_data]),
+            ep_rewards=torch.cat([d.ep_rewards for d in buffer_data]),
+        )
 
     def get_env_info(self):
         """Return environment observation/action space info."""
