@@ -234,6 +234,10 @@ class RolloutWorker:
         # Reset all environments
         states = torch.as_tensor(vec_env.reset_all(), dtype=torch.float)  # [num_envs, obs_dim]
         traj_lens = torch.zeros(num_envs, dtype=torch.int32)
+        ep_lens_per_env = [[] for _ in range(num_envs)]
+        ep_rewards_per_env = [[] for _ in range(num_envs)]
+        ep_reward_accum = [0.0] * num_envs
+        ep_len_accum = [0] * num_envs
 
         # For recurrent policies
         if hasattr(policy, "init_hidden_state"):
@@ -267,6 +271,8 @@ class RolloutWorker:
                     bool(dones[i]),  # Convert numpy.bool_ to Python bool
                 )
                 traj_lens[i] += 1
+                ep_len_accum[i] += 1
+                ep_reward_accum[i] += float(rewards[i])
 
                 # Finish trajectory if done or max length reached
                 if dones[i] or traj_lens[i] >= max_traj_len:
@@ -279,6 +285,12 @@ class RolloutWorker:
                     # Bootstrap with final value if not done (truncated episode)
                     buffers[i].finish_path(last_val=(not dones[i]) * final_value)
                     traj_lens[i] = 0
+
+                    # Record completed episode stats
+                    ep_lens_per_env[i].append(ep_len_accum[i])
+                    ep_rewards_per_env[i].append(ep_reward_accum[i])
+                    ep_len_accum[i] = 0
+                    ep_reward_accum[i] = 0.0
 
                     # Reset hidden states for recurrent policies
                     # Note: This is a simplification - ideally we'd track hidden states per env
@@ -303,19 +315,25 @@ class RolloutWorker:
                     # Bootstrap with final value (trajectory was truncated, not done)
                     buffers[i].finish_path(last_val=final_value)
 
-        # Aggregate all buffers
-        return self._aggregate_buffers(buffers)
+        # Flatten episode stats across all envs
+        all_ep_lens = [ep_len for per_env in ep_lens_per_env for ep_len in per_env]
+        all_ep_rewards = [r for per_env in ep_rewards_per_env for r in per_env]
 
-    def _aggregate_buffers(self, buffers):
+        # Aggregate all buffers
+        return self._aggregate_buffers(buffers, all_ep_lens, all_ep_rewards)
+
+    def _aggregate_buffers(self, buffers, ep_lens=None, ep_rewards=None):
         """Aggregate multiple PPOBuffer instances into a single BatchData.
 
         Args:
             buffers: List of PPOBuffer instances
+            ep_lens: Completed episode lengths (from vectorized sampling)
+            ep_rewards: Completed episode rewards (from vectorized sampling)
 
         Returns:
             BatchData: Aggregated trajectory data
         """
-        # Get data from all buffers
+        # Get data from all buffers (episode stats handled separately)
         buffer_data = [buf.get_data() for buf in buffers]
 
         # Fix traj_idx: offset each buffer's indices by cumulative sample count
@@ -337,8 +355,10 @@ class RolloutWorker:
             returns=torch.cat([d.returns for d in buffer_data]),
             dones=torch.cat([d.dones for d in buffer_data]),
             traj_idx=torch.cat(traj_idx_list),
-            ep_lens=torch.cat([d.ep_lens for d in buffer_data]),
-            ep_rewards=torch.cat([d.ep_rewards for d in buffer_data]),
+            ep_lens=torch.tensor(ep_lens) if ep_lens is not None else torch.cat([d.ep_lens for d in buffer_data]),
+            ep_rewards=(
+                torch.tensor(ep_rewards) if ep_rewards is not None else torch.cat([d.ep_rewards for d in buffer_data])
+            ),
         )
 
     def get_env_info(self):
