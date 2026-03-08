@@ -428,7 +428,7 @@ class PPO:
 
         # calculate average evaluation reward
         eval_ep_rewards = [float(i) for batch in eval_batches for i in batch.ep_rewards]
-        avg_eval_ep_rewards = np.mean(eval_ep_rewards)
+        avg_eval_ep_rewards = np.mean(eval_ep_rewards) if eval_ep_rewards else float("nan")
 
         # save checkpoint - saves with suffix and as best if improved
         self.checkpointer.save_if_best(nets, avg_eval_ep_rewards, itr)
@@ -440,6 +440,10 @@ class PPO:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr, eps=self.eps)
 
         train_start_time = time.time()
+
+        # Track last known episode stats for iterations where no episodes complete
+        last_mean_ep_reward = float("nan")
+        last_mean_ep_len = float("nan")
 
         obs_mirr, act_mirr = None, None
         if hasattr(env_fn(), "mirror_observation"):
@@ -580,9 +584,19 @@ class PPO:
 
             action_noise = self.policy.stds.data.tolist()
 
+            # Handle empty episode stats (no episodes completed this iteration)
+            if len(batch.ep_rewards) > 0:
+                mean_ep_reward = float(torch.mean(batch.ep_rewards))
+                mean_ep_len = float(torch.mean(batch.ep_lens.float()))
+                last_mean_ep_reward = mean_ep_reward
+                last_mean_ep_len = mean_ep_len
+            else:
+                mean_ep_reward = last_mean_ep_reward
+                mean_ep_len = last_mean_ep_len
+
             sys.stdout.write("-" * 37 + "\n")
-            sys.stdout.write(f"| {'Mean Eprew':>15} | {torch.mean(batch.ep_rewards):>15.5g} |\n")
-            sys.stdout.write(f"| {'Mean Eplen':>15} | {torch.mean(batch.ep_lens.float()):>15.5g} |\n")
+            sys.stdout.write(f"| {'Mean Eprew':>15} | {mean_ep_reward:>15.5g} |\n")
+            sys.stdout.write(f"| {'Mean Eplen':>15} | {mean_ep_len:>15.5g} |\n")
             sys.stdout.write(f"| {'Actor loss':>15} | {np.mean(actor_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Critic loss':>15} | {np.mean(critic_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Mirror loss':>15} | {np.mean(mirror_losses):>15.3g} |\n")
@@ -614,8 +628,8 @@ class PPO:
 
                 eval_ep_lens = [float(i) for b in eval_batches for i in b.ep_lens]
                 eval_ep_rewards = [float(i) for b in eval_batches for i in b.ep_rewards]
-                avg_eval_ep_lens = np.mean(eval_ep_lens)
-                avg_eval_ep_rewards = np.mean(eval_ep_rewards)
+                avg_eval_ep_lens = np.mean(eval_ep_lens) if eval_ep_lens else float("nan")
+                avg_eval_ep_rewards = np.mean(eval_ep_rewards) if eval_ep_rewards else float("nan")
                 print("====EVALUATE EPISODE====")
                 print(
                     f"(Episode length:{avg_eval_ep_lens:.3f}. Reward:{avg_eval_ep_rewards:.3f}. "
@@ -631,8 +645,8 @@ class PPO:
                 critic_loss=np.mean(critic_losses),
                 mirror_loss=np.mean(mirror_losses),
                 imitation_loss=np.mean(imitation_losses),
-                mean_reward=float(torch.mean(batch.ep_rewards)),
-                mean_ep_len=float(torch.mean(batch.ep_lens.float())),
+                mean_reward=mean_ep_reward,
+                mean_ep_len=mean_ep_len,
                 mean_noise_std=np.mean(action_noise),
                 step=itr,
             )
