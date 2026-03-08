@@ -11,7 +11,8 @@ from copy import deepcopy
 import ray
 import torch
 
-from rl.storage.rollout_storage import PPOBuffer
+from rl.envs.vectorized_env import VectorizedEnv
+from rl.storage.rollout_storage import BatchData, PPOBuffer
 from rl.utils.seeding import set_global_seeds
 
 
@@ -28,15 +29,18 @@ class RolloutWorker:
     Instead of recreating the environment on every sample() call (which involves
     expensive MuJoCo model compilation), this actor creates the environment once
     and reuses it across all training iterations.
+
+    Supports vectorized environments for batched policy inference.
     """
 
-    def __init__(self, env_fn, policy_template, critic_template, seed=None, worker_id=0):
-        """Initialize worker with persistent environment.
+    def __init__(self, env_fn, policy_template, critic_template, num_envs_per_worker=1, seed=None, worker_id=0):
+        """Initialize worker with persistent environment(s).
 
         Args:
-            env_fn: Factory function to create the environment (called once)
+            env_fn: Factory function to create the environment (called once per env)
             policy_template: Policy network to clone for local inference
             critic_template: Critic network to clone for local inference
+            num_envs_per_worker: Number of environments per worker (default: 1 for backward compatibility)
             seed: Worker-specific seed for reproducibility
             worker_id: Identifier for this worker (for error reporting)
         """
@@ -47,9 +51,17 @@ class RolloutWorker:
         if seed is not None:
             set_global_seeds(seed, cuda_deterministic=False)
 
-        # Create environment ONCE - this is the key optimization
-        # Global RNG is already seeded above, so env will use seeded np.random
-        self.env = env_fn()
+        # Create environment(s) ONCE - this is the key optimization
+        self.num_envs_per_worker = num_envs_per_worker
+
+        if num_envs_per_worker > 1:
+            # Use vectorized environment for batched inference
+            self.env = VectorizedEnv(env_fn, num_envs_per_worker)
+            self.is_vectorized = True
+        else:
+            # Single environment (backward compatibility)
+            self.env = env_fn()
+            self.is_vectorized = False
 
         # Create local copies of networks for inference
         # These will be updated via set_weights() before each sampling round
@@ -67,6 +79,13 @@ class RolloutWorker:
         # Track episode stats incrementally (for logging)
         self.current_ep_reward = 0.0
         self.current_ep_len = 0
+
+        # Vectorized env state persistence
+        if self.is_vectorized:
+            self.vec_states = None
+            self.vec_traj_lens = None
+            self.vec_ep_reward_accum = None
+            self.vec_ep_len_accum = None
 
     def sync_state(self, policy_state_dict, critic_state_dict, obs_mean, obs_std, iteration_count):
         """Sync all worker state from main process in a single call.
@@ -92,11 +111,14 @@ class RolloutWorker:
         self.critic.obs_std = obs_std
 
         # Update iteration count for curriculum learning
-        self.env.robot.iteration_count = iteration_count
+        if self.is_vectorized:
+            self.env.set_iteration_count(iteration_count)
+        else:
+            self.env.robot.iteration_count = iteration_count
 
     @torch.no_grad()
     def sample(self, gamma, max_steps, max_traj_len, deterministic=False):
-        """Collect trajectory data using the persistent environment.
+        """Collect trajectory data using the persistent environment(s).
 
         Collects exactly max_steps timesteps. Episodes may span multiple sample()
         calls - if the buffer fills mid-episode, the episode continues on the
@@ -115,6 +137,13 @@ class RolloutWorker:
             RolloutWorkerError: If an error occurs during sampling, with context
                 about which worker failed and the original exception.
         """
+        if self.is_vectorized:
+            return self._sample_vectorized(gamma, max_steps, max_traj_len, deterministic)
+        else:
+            return self._sample_single(gamma, max_steps, max_traj_len, deterministic)
+
+    def _sample_single(self, gamma, max_steps, max_traj_len, deterministic):
+        """Original single-environment sampling (backward compatibility)."""
         policy = self.policy
         critic = self.critic
         env = self.env
@@ -196,3 +225,160 @@ class RolloutWorker:
                 f"Worker {self.worker_id} failed at step {len(memory)}, "
                 f"ep_len={self.current_ep_len}: {type(e).__name__}: {e}\n{tb}"
             ) from e
+
+    def _sample_vectorized(self, gamma, max_steps, max_traj_len, deterministic):
+        """Vectorized environment sampling with batched policy inference."""
+        policy = self.policy
+        critic = self.critic
+        vec_env = self.env
+        num_envs = self.num_envs_per_worker
+
+        # Create separate buffer for each environment
+        buffers = [
+            PPOBuffer(self.state_dim, self.action_dim, gamma=gamma, size=max_traj_len * 2) for _ in range(num_envs)
+        ]
+
+        # Initialize or continue from previous state
+        if self.vec_states is None:
+            states = torch.as_tensor(vec_env.reset_all(), dtype=torch.float)
+            traj_lens = torch.zeros(num_envs, dtype=torch.int32)
+            ep_reward_accum = [0.0] * num_envs
+            ep_len_accum = [0] * num_envs
+            if hasattr(policy, "init_hidden_state"):
+                policy.init_hidden_state()
+            if hasattr(critic, "init_hidden_state"):
+                critic.init_hidden_state()
+        else:
+            states = self.vec_states
+            traj_lens = self.vec_traj_lens
+            ep_reward_accum = self.vec_ep_reward_accum
+            ep_len_accum = self.vec_ep_len_accum
+
+        ep_lens_per_env = [[] for _ in range(num_envs)]
+        ep_rewards_per_env = [[] for _ in range(num_envs)]
+
+        total_steps = 0
+        while total_steps < max_steps:
+            # Batched policy inference - KEY OPTIMIZATION
+            actions = policy(states, deterministic=deterministic)  # [num_envs, act_dim]
+            values = critic(states)  # [num_envs, 1]
+
+            # Step all environments
+            next_states, rewards, dones, infos = vec_env.step(actions)
+
+            # Convert to tensors
+            next_states = torch.as_tensor(next_states, dtype=torch.float)
+            rewards = torch.as_tensor(rewards, dtype=torch.float)
+
+            # Store in individual buffers
+            for i in range(num_envs):
+                buffers[i].store(
+                    states[i],
+                    actions[i],
+                    rewards[i],
+                    values[i],
+                    bool(dones[i]),  # Convert numpy.bool_ to Python bool
+                )
+                traj_lens[i] += 1
+                ep_len_accum[i] += 1
+                ep_reward_accum[i] += float(rewards[i])
+
+                # Finish trajectory if done or max length reached
+                if dones[i] or traj_lens[i] >= max_traj_len:
+                    # Use terminal observation for bootstrapping (not the auto-reset obs)
+                    if dones[i] and "terminal_observation" in infos[i]:
+                        terminal_obs = torch.as_tensor(infos[i]["terminal_observation"], dtype=torch.float)
+                        final_value = critic(terminal_obs.unsqueeze(0)).squeeze(0)
+                    else:
+                        final_value = critic(next_states[i].unsqueeze(0)).squeeze(0)
+                    # Bootstrap with final value if not done (truncated episode)
+                    buffers[i].finish_path(last_val=(not dones[i]) * final_value)
+                    traj_lens[i] = 0
+
+                    # Record completed episode stats
+                    ep_lens_per_env[i].append(ep_len_accum[i])
+                    ep_rewards_per_env[i].append(ep_reward_accum[i])
+                    ep_len_accum[i] = 0
+                    ep_reward_accum[i] = 0.0
+
+                    # Reset hidden states for recurrent policies
+                    # Note: This is a simplification - ideally we'd track hidden states per env
+                    if hasattr(policy, "init_hidden_state"):
+                        policy.init_hidden_state()
+                    if hasattr(critic, "init_hidden_state"):
+                        critic.init_hidden_state()
+
+            states = next_states
+            total_steps += num_envs
+
+        # Finish any incomplete trajectories before aggregating
+        # This is critical: without finish_path(), returns are never computed!
+        for i in range(num_envs):
+            # Check if buffer has unfinished trajectory (data after last finish_path call)
+            if len(buffers[i]) > 0 and len(buffers[i].traj_idx) > 0:
+                # Check if there's data after the last trajectory marker
+                last_traj_end = int(buffers[i].traj_idx[-1])
+                if buffers[i].ptr > last_traj_end:
+                    # Unfinished trajectory exists - compute final value and finish it
+                    final_value = critic(states[i].unsqueeze(0)).squeeze(0)
+                    # Bootstrap with final value (trajectory was truncated, not done)
+                    buffers[i].finish_path(last_val=final_value)
+
+        # Persist state for next sample() call
+        self.vec_states = states
+        self.vec_traj_lens = traj_lens
+        self.vec_ep_reward_accum = ep_reward_accum
+        self.vec_ep_len_accum = ep_len_accum
+
+        # Flatten episode stats across all envs
+        all_ep_lens = [ep_len for per_env in ep_lens_per_env for ep_len in per_env]
+        all_ep_rewards = [r for per_env in ep_rewards_per_env for r in per_env]
+
+        # Aggregate all buffers
+        return self._aggregate_buffers(buffers, all_ep_lens, all_ep_rewards)
+
+    def _aggregate_buffers(self, buffers, ep_lens=None, ep_rewards=None):
+        """Aggregate multiple PPOBuffer instances into a single BatchData.
+
+        Args:
+            buffers: List of PPOBuffer instances
+            ep_lens: Completed episode lengths (from vectorized sampling)
+            ep_rewards: Completed episode rewards (from vectorized sampling)
+
+        Returns:
+            BatchData: Aggregated trajectory data
+        """
+        # Get data from all buffers (episode stats handled separately)
+        buffer_data = [buf.get_data() for buf in buffers]
+
+        # Fix traj_idx: offset each buffer's indices by cumulative sample count
+        traj_idx_list = []
+        offset = 0
+        for data in buffer_data:
+            worker_traj_idx = data.traj_idx
+            # Skip the first 0 from subsequent buffers (it's redundant)
+            if offset > 0:
+                worker_traj_idx = worker_traj_idx[1:]
+            traj_idx_list.append(worker_traj_idx + offset)
+            offset += len(data.states)
+
+        return BatchData(
+            states=torch.cat([d.states for d in buffer_data]),
+            actions=torch.cat([d.actions for d in buffer_data]),
+            rewards=torch.cat([d.rewards for d in buffer_data]),
+            values=torch.cat([d.values for d in buffer_data]),
+            returns=torch.cat([d.returns for d in buffer_data]),
+            dones=torch.cat([d.dones for d in buffer_data]),
+            traj_idx=torch.cat(traj_idx_list),
+            ep_lens=torch.tensor(ep_lens) if ep_lens is not None else torch.cat([d.ep_lens for d in buffer_data]),
+            ep_rewards=(
+                torch.tensor(ep_rewards) if ep_rewards is not None else torch.cat([d.ep_rewards for d in buffer_data])
+            ),
+        )
+
+    def get_env_info(self):
+        """Return environment observation/action space info."""
+        return {
+            "obs_dim": self.env.observation_space.shape[0],
+            "action_dim": self.env.action_space.shape[0],
+        }

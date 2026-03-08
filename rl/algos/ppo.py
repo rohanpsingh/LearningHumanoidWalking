@@ -45,8 +45,11 @@ class PPO:
         self.eval_freq = args.eval_freq
         self.recurrent = args.recurrent
         self.imitate_coeff = args.imitate_coeff
+        self.num_envs_per_worker = getattr(args, "num_envs_per_worker", 1)
 
         # batch_size depends on number of parallel envs
+        # Total parallel envs = n_proc when num_envs_per_worker=1 (backward compatible)
+        # With vectorization: total parallel envs = num_workers * num_envs_per_worker = n_proc
         self.batch_size = self.n_proc * self.max_traj_len
 
         self.total_steps = 0
@@ -151,7 +154,20 @@ class PPO:
         # Each worker creates its environment ONCE and reuses it across all iterations,
         # avoiding expensive MuJoCo model recompilation.
         # Workers always use CPU (they do single-sample inference, no batching benefit)
-        print(f"Creating {self.n_proc} persistent rollout workers...")
+
+        # Calculate number of workers based on vectorization
+        # n_proc represents total parallel environments
+        # If num_envs_per_worker > 1, we use fewer workers with more envs each
+        if self.num_envs_per_worker > 1:
+            self.num_workers = max(1, self.n_proc // self.num_envs_per_worker)
+            print(
+                f"Creating {self.num_workers} persistent rollout workers, "
+                f"each with {self.num_envs_per_worker} vectorized environments "
+                f"(total {self.num_workers * self.num_envs_per_worker} parallel envs)..."
+            )
+        else:
+            self.num_workers = self.n_proc
+            print(f"Creating {self.num_workers} persistent rollout workers...")
 
         # Create CPU copies for workers (deepcopy to avoid reference issues)
         if self.device.type == "cuda":
@@ -175,10 +191,11 @@ class PPO:
                 env_fn,
                 policy_cpu,
                 critic_cpu,
+                self.num_envs_per_worker,
                 seed=get_worker_seed(self.seed, i) if self.seed is not None else None,
                 worker_id=i,
             )
-            for i in range(self.n_proc)
+            for i in range(self.num_workers)
         ]
         print("Workers created successfully.")
 
@@ -206,8 +223,16 @@ class PPO:
 
         This method uses pre-created Ray actors that maintain persistent environments,
         avoiding the expensive environment recreation that happens with stateless tasks.
+
+        With vectorized environments, each worker manages multiple environments and
+        collects samples from all of them in parallel using batched policy inference.
         """
-        max_steps = self.batch_size // self.n_proc
+        # Calculate max_steps per worker
+        # batch_size = n_proc * max_traj_len (total samples we want across all workers)
+        # Each worker should collect: batch_size / num_workers samples
+        # This is true regardless of num_envs_per_worker (vectorization just changes
+        # how each worker collects its samples, not how many it should collect)
+        max_steps = self.batch_size // self.num_workers
 
         # Get state dicts and obs normalization, move to CPU for workers
         # (Workers always run on CPU, even if main process is on GPU)
@@ -403,7 +428,7 @@ class PPO:
 
         # calculate average evaluation reward
         eval_ep_rewards = [float(i) for batch in eval_batches for i in batch.ep_rewards]
-        avg_eval_ep_rewards = np.mean(eval_ep_rewards)
+        avg_eval_ep_rewards = np.mean(eval_ep_rewards) if eval_ep_rewards else float("nan")
 
         # save checkpoint - saves with suffix and as best if improved
         self.checkpointer.save_if_best(nets, avg_eval_ep_rewards, itr)
@@ -415,6 +440,10 @@ class PPO:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr, eps=self.eps)
 
         train_start_time = time.time()
+
+        # Track last known episode stats for iterations where no episodes complete
+        last_mean_ep_reward = float("nan")
+        last_mean_ep_len = float("nan")
 
         obs_mirr, act_mirr = None, None
         if hasattr(env_fn(), "mirror_observation"):
@@ -555,9 +584,19 @@ class PPO:
 
             action_noise = self.policy.stds.data.tolist()
 
+            # Handle empty episode stats (no episodes completed this iteration)
+            if len(batch.ep_rewards) > 0:
+                mean_ep_reward = float(torch.mean(batch.ep_rewards))
+                mean_ep_len = float(torch.mean(batch.ep_lens.float()))
+                last_mean_ep_reward = mean_ep_reward
+                last_mean_ep_len = mean_ep_len
+            else:
+                mean_ep_reward = last_mean_ep_reward
+                mean_ep_len = last_mean_ep_len
+
             sys.stdout.write("-" * 37 + "\n")
-            sys.stdout.write(f"| {'Mean Eprew':>15} | {torch.mean(batch.ep_rewards):>15.5g} |\n")
-            sys.stdout.write(f"| {'Mean Eplen':>15} | {torch.mean(batch.ep_lens.float()):>15.5g} |\n")
+            sys.stdout.write(f"| {'Mean Eprew':>15} | {mean_ep_reward:>15.5g} |\n")
+            sys.stdout.write(f"| {'Mean Eplen':>15} | {mean_ep_len:>15.5g} |\n")
             sys.stdout.write(f"| {'Actor loss':>15} | {np.mean(actor_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Critic loss':>15} | {np.mean(critic_losses):>15.3g} |\n")
             sys.stdout.write(f"| {'Mirror loss':>15} | {np.mean(mirror_losses):>15.3g} |\n")
@@ -589,8 +628,8 @@ class PPO:
 
                 eval_ep_lens = [float(i) for b in eval_batches for i in b.ep_lens]
                 eval_ep_rewards = [float(i) for b in eval_batches for i in b.ep_rewards]
-                avg_eval_ep_lens = np.mean(eval_ep_lens)
-                avg_eval_ep_rewards = np.mean(eval_ep_rewards)
+                avg_eval_ep_lens = np.mean(eval_ep_lens) if eval_ep_lens else float("nan")
+                avg_eval_ep_rewards = np.mean(eval_ep_rewards) if eval_ep_rewards else float("nan")
                 print("====EVALUATE EPISODE====")
                 print(
                     f"(Episode length:{avg_eval_ep_lens:.3f}. Reward:{avg_eval_ep_rewards:.3f}. "
@@ -606,8 +645,8 @@ class PPO:
                 critic_loss=np.mean(critic_losses),
                 mirror_loss=np.mean(mirror_losses),
                 imitation_loss=np.mean(imitation_losses),
-                mean_reward=float(torch.mean(batch.ep_rewards)),
-                mean_ep_len=float(torch.mean(batch.ep_lens.float())),
+                mean_reward=mean_ep_reward,
+                mean_ep_len=mean_ep_len,
                 mean_noise_std=np.mean(action_noise),
                 step=itr,
             )
