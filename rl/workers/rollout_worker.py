@@ -80,6 +80,13 @@ class RolloutWorker:
         self.current_ep_reward = 0.0
         self.current_ep_len = 0
 
+        # Vectorized env state persistence
+        if self.is_vectorized:
+            self.vec_states = None
+            self.vec_traj_lens = None
+            self.vec_ep_reward_accum = None
+            self.vec_ep_len_accum = None
+
     def sync_state(self, policy_state_dict, critic_state_dict, obs_mean, obs_std, iteration_count):
         """Sync all worker state from main process in a single call.
 
@@ -231,22 +238,24 @@ class RolloutWorker:
             PPOBuffer(self.state_dim, self.action_dim, gamma=gamma, size=max_traj_len * 2) for _ in range(num_envs)
         ]
 
-        # Reset all environments
-        states = torch.as_tensor(vec_env.reset_all(), dtype=torch.float)  # [num_envs, obs_dim]
-        traj_lens = torch.zeros(num_envs, dtype=torch.int32)
+        # Initialize or continue from previous state
+        if self.vec_states is None:
+            states = torch.as_tensor(vec_env.reset_all(), dtype=torch.float)
+            traj_lens = torch.zeros(num_envs, dtype=torch.int32)
+            ep_reward_accum = [0.0] * num_envs
+            ep_len_accum = [0] * num_envs
+            if hasattr(policy, "init_hidden_state"):
+                policy.init_hidden_state()
+            if hasattr(critic, "init_hidden_state"):
+                critic.init_hidden_state()
+        else:
+            states = self.vec_states
+            traj_lens = self.vec_traj_lens
+            ep_reward_accum = self.vec_ep_reward_accum
+            ep_len_accum = self.vec_ep_len_accum
+
         ep_lens_per_env = [[] for _ in range(num_envs)]
         ep_rewards_per_env = [[] for _ in range(num_envs)]
-        ep_reward_accum = [0.0] * num_envs
-        ep_len_accum = [0] * num_envs
-
-        # For recurrent policies
-        if hasattr(policy, "init_hidden_state"):
-            # Note: This might need modification for vectorized recurrent policies
-            # Currently resets to same initial state for all envs
-            policy.init_hidden_state()
-
-        if hasattr(critic, "init_hidden_state"):
-            critic.init_hidden_state()
 
         total_steps = 0
         while total_steps < max_steps:
@@ -314,6 +323,12 @@ class RolloutWorker:
                     final_value = critic(states[i].unsqueeze(0)).squeeze(0)
                     # Bootstrap with final value (trajectory was truncated, not done)
                     buffers[i].finish_path(last_val=final_value)
+
+        # Persist state for next sample() call
+        self.vec_states = states
+        self.vec_traj_lens = traj_lens
+        self.vec_ep_reward_accum = ep_reward_accum
+        self.vec_ep_len_accum = ep_len_accum
 
         # Flatten episode stats across all envs
         all_ep_lens = [ep_len for per_env in ep_lens_per_env for ep_len in per_env]
