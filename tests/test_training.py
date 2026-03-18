@@ -206,13 +206,29 @@ class TestTrainingLoop:
     @pytest.mark.timeout(120)
     def test_training_one_iteration(self, env_factory, train_args, env_name):
         """Test training runs for one iteration without errors."""
+        from functools import partial
+
         from rl.algos.ppo import PPO
+        from rl.envs.wrappers import SymmetricEnv
 
         train_args.n_itr = 1
         train_args.eval_freq = 1
 
-        ppo = PPO(env_factory, train_args)
-        ppo.train(env_factory, n_itr=1)
+        # Wrap in SymmetricEnv when mirror is supported, matching run_experiment.py
+        train_env_fn = env_factory
+        if not train_args.no_mirror:
+            _env = env_factory()
+            train_env_fn = partial(
+                SymmetricEnv,
+                env_factory,
+                mirrored_obs=_env.robot.mirrored_obs,
+                mirrored_act=_env.robot.mirrored_acts,
+                clock_inds=_env.robot.clock_inds,
+            )
+            _env.close()
+
+        ppo = PPO(train_env_fn, train_args)
+        ppo.train(train_env_fn, n_itr=1)
 
         # Check that weights were saved
         assert (train_args.logdir / "actor_0.pt").exists(), f"actor_0.pt not saved for {env_name}"
