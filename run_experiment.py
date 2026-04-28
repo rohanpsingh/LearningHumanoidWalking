@@ -99,10 +99,9 @@ def import_env(env_name_str):
 
 
 def run_experiment(args):
-    # Create timestamped subdirectory: yy-mm-dd-hh-mm-ss_env_name
-    timestamp = datetime.now().strftime("%y-%m-%d-%H-%M-%S")
-    run_name = f"{timestamp}_{args.env}"
-    args.logdir = Path(args.logdir) / run_name
+    # Create timestamped subdirectory: yy-mm-dd-hh-mm-ss-fff_env_name
+    timestamp = datetime.now().strftime("%y-%m-%d-%H-%M-%S-%f")[:-3]
+    args.logdir = Path(args.logdir) / f"{timestamp}_{args.env}"
 
     # Print system info before training
     print_system_info(args)
