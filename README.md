@@ -79,7 +79,7 @@ Or, we could write a rollout script specific to each environment.
 A minimal swing-up task for testing the RL pipeline. The goal is to swing the pole from hanging down to balancing upright.
 
 ```
-$ uv run run_experiment.py train --env cartpole --n-itr 500 --gamma 0.95 --std-dev 0.15 --learn-std
+$ uv run run_experiment.py train --env cartpole --n-itr 500 --std-dev 0.15 --learn-std --entropy-coeff 0.01 --minibatch-size 256 --max-traj-len 500 --no-mirror
 ```
 
 ## Configuration

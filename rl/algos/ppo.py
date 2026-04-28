@@ -27,6 +27,7 @@ class PPO:
     def __init__(self, env_fn, args, seed=None):
         self.seed = seed
         self.gamma = args.gamma
+        self.lam = args.lam
         self.lr = args.lr
         # LSTM networks have vanishing gradients in hidden layers (~100x smaller than FF)
         # Use higher learning rate to compensate when using default lr
@@ -232,7 +233,7 @@ class PPO:
 
         # Collect samples from all workers in parallel
         sample_futures = [
-            w.sample.remote(self.gamma, max_steps, self.max_traj_len, deterministic) for w in self.workers
+            w.sample.remote(self.gamma, self.lam, max_steps, self.max_traj_len, deterministic) for w in self.workers
         ]
         result = ray.get(sample_futures)
 

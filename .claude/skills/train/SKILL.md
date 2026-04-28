@@ -61,10 +61,11 @@ RAY_ADDRESS= uv run python run_experiment.py train --env <ENV> --logdir <LOGDIR>
 
 ## Cartpole-Specific Defaults
 
-For cartpole, these settings are known to work well (from prior experiments):
-- `--gamma 0.99 --lr 3e-5 --minibatch-size 256 --max-grad-norm 0.02`
+For cartpole, these settings are known to work well with the current defaults
+(`--lr 3e-4 --max-grad-norm 0.5 --lam 0.95 --gamma 0.99`):
+- `--minibatch-size 256`
 - `--std-dev 0.15 --learn-std --entropy-coeff 0.01`
-- `--max-traj-len 500 --n-itr 1500 --num-procs 12`
+- `--max-traj-len 500 --n-itr 500 --num-procs 12`
 - `--no-mirror` (cartpole has no body symmetry)
 
 Suggest these defaults when the user trains cartpole, but let them override.
