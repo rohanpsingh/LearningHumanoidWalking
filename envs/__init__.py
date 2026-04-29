@@ -5,7 +5,7 @@ This makes environments discoverable for testing and external use.
 """
 
 from envs.cartpole import CartpoleEnv
-from envs.h1 import H1Env
+from envs.h1 import H1Env, H1WalkEnv
 from envs.jvrc import JvrcStepEnv, JvrcWalkEnv
 
 # Registry of all available environments
@@ -14,6 +14,7 @@ ENVIRONMENTS = {
     "jvrc_walk": (JvrcWalkEnv, "jvrc"),
     "jvrc_step": (JvrcStepEnv, "jvrc"),
     "h1": (H1Env, "h1"),
+    "h1_walk": (H1WalkEnv, "h1"),
     "cartpole": (CartpoleEnv, "cartpole"),
 }
 
@@ -21,6 +22,7 @@ __all__ = [
     "JvrcWalkEnv",
     "JvrcStepEnv",
     "H1Env",
+    "H1WalkEnv",
     "CartpoleEnv",
     "ENVIRONMENTS",
 ]

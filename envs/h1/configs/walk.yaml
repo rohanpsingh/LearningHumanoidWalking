@@ -1,0 +1,58 @@
+sim_dt: 0.001
+control_dt: 0.025
+obs_history_len: 1
+action_smoothing: 0.5
+
+# Path for exporting generated MuJoCo XML files
+xml_export_path: /tmp/mjcf-export
+
+ctrllimited: false
+jointlimited: false
+reduced_xml: true
+
+init_noise: 3
+
+# Half-sitting pose in radians (legs only)
+half_sitting_pose: [0, 0, -0.2, 0.6, -0.4,
+                    0, 0, -0.2, 0.6, -0.4]
+
+pdgains:
+  "left_hip_yaw":   [100, 10]
+  "left_hip_roll":  [100, 10]
+  "left_hip_pitch": [100, 10]
+  "left_knee":      [100, 10]
+  "left_ankle":     [20, 4]
+  "right_hip_yaw":   [100, 10]
+  "right_hip_roll":  [100, 10]
+  "right_hip_pitch": [100, 10]
+  "right_knee":      [100, 10]
+  "right_ankle":     [20, 4]
+
+# Walking task parameters
+task:
+  goal_height: 1.0
+  total_duration: 0.5
+  swing_duration: 0.4
+  stance_duration: 0.1
+
+observation_noise:
+  enabled: true
+  multiplier: 1.0
+  type: "uniform"
+  scales:
+    root_orient: 0.05
+    root_ang_vel: 0.05
+    motor_pos: 0.02
+    motor_vel: 0.05
+    motor_tau: 5.0
+
+perturbation:
+  enable: true
+  bodies: ["pelvis", "torso_link"]
+  force_magnitude: 10
+  torque_magnitude: 2
+  interval: 5
+
+dynamics_randomization:
+  enable: true
+  interval: 0.5

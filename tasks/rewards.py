@@ -6,17 +6,20 @@ Functions return scalar reward values, typically in range [0, 1] for exponential
 import numpy as np
 
 
-def calc_fwd_vel_reward(root_vel: float, goal_speed: float) -> float:
-    """Reward for forward velocity tracking.
+def calc_fwd_vel_reward(root_vel, goal_speed) -> float:
+    """Reward for linear velocity tracking.
+
+    Accepts scalar (forward-only) or vector (planar) velocities. For vectors,
+    the error is the Euclidean norm of the difference.
 
     Args:
-        root_vel: Current forward velocity of the root body.
-        goal_speed: Target forward velocity.
+        root_vel: Current root velocity (scalar or 1-D array).
+        goal_speed: Target velocity (scalar or 1-D array of matching shape).
 
     Returns:
         Exponential reward based on velocity error.
     """
-    error = np.abs(root_vel - goal_speed)
+    error = np.linalg.norm(np.atleast_1d(root_vel) - np.atleast_1d(goal_speed))
     return np.exp(-10 * (error**2))
 
 

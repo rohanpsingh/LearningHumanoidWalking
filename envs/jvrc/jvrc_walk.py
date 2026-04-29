@@ -30,7 +30,7 @@ class JvrcWalkEnv(JvrcBaseEnv):
             rfoot_body=self.RFOOT_BODY,
             head_body=self.HEAD_BODY,
         )
-        self.task._neutral_pose = self.nominal_pose
+        self.task._neutral_pose = np.deg2rad(self.half_sitting_pose)
 
         # Set task parameters from config
         task_cfg = self.cfg.task
@@ -40,19 +40,31 @@ class JvrcWalkEnv(JvrcBaseEnv):
         self.task._stance_duration = task_cfg.stance_duration
 
     def _get_num_external_obs(self) -> int:
-        return 6  # clock(2) + mode_encode(3) + mode_ref(1)
+        return 8  # clock(2) + mode_encode(3) + mode_ref(3)
 
     def _setup_obs_normalization(self) -> None:
         self.obs_mean = np.concatenate(
-            (np.zeros(5), np.deg2rad(self.half_sitting_pose), np.zeros(12), [0.5, 0.5, 0.5, 0, 0, 0])
+            (
+                np.zeros(5),
+                np.deg2rad(self.half_sitting_pose),
+                np.zeros(12),
+                [0, 0, 0.5, 0.5, 0.5, 0, 0, 0],
+            )
         )
-        self.obs_std = np.concatenate(([0.2, 0.2, 1, 1, 1], 0.5 * np.ones(12), 4 * np.ones(12), [1, 1, 1, 1, 1, 1]))
+        self.obs_std = np.concatenate(
+            (
+                [0.2, 0.2, 1, 1, 1],
+                0.5 * np.ones(12),
+                4 * np.ones(12),
+                [1, 1, 1, 1, 1, 0.5, 0.5, 0.5],
+            )
+        )
         self.obs_mean = np.tile(self.obs_mean, self.history_len)
         self.obs_std = np.tile(self.obs_std, self.history_len)
 
     def _get_external_state(self) -> np.ndarray:
         clock = self._get_clock_signal()
-        return np.concatenate((clock, self.task.mode.encode(), [self.task.mode_ref]))
+        return np.concatenate((clock, self.task.mode.encode(), self.task.mode_ref))
 
     def draw_markers(self, marker_drawer):
         """Draw an arrow above the robot's head indicating walking mode and reference."""
@@ -71,15 +83,15 @@ class JvrcWalkEnv(JvrcBaseEnv):
 
         # Determine arrow direction and size based on mode
         mode = self.task.mode
-        mode_ref = self.task.mode_ref
+        mode_ref = self.task.mode_ref  # [yaw_vel, vx, vy]
         rgba_blue = np.array([0, 0, 1, 0.5])
         rgba_green = np.array([0, 1, 0, 0.5])
 
         if mode == walking_task.WalkModes.FORWARD:
-            arrow_length = abs(mode_ref)
+            arrow_length = float(np.linalg.norm(mode_ref[1:3]))
             arrow_mat = tf3.euler.euler2mat(0, np.pi / 2, root_yaw)
         elif mode == walking_task.WalkModes.INPLACE:
-            arrow_length = mode_ref
+            arrow_length = float(mode_ref[0])
             arrow_mat = tf3.euler.euler2mat(0, 0, 0)
         else:  # STANDING
             arrow_length = 0.0

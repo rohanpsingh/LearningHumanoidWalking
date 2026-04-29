@@ -91,6 +91,8 @@ def import_env(env_name_str):
         from envs.jvrc import JvrcStepEnv as Env
     elif env_name_str == "h1":
         from envs.h1 import H1Env as Env
+    elif env_name_str == "h1_walk":
+        from envs.h1 import H1WalkEnv as Env
     elif env_name_str == "cartpole":
         from envs.cartpole import CartpoleEnv as Env
     else:
