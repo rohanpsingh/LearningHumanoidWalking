@@ -1,11 +1,11 @@
-"""Tests for the env-owned imitation-adapter contract.
+"""Tests for the env-owned imitation-projector contract.
 
 Covers:
-- PPO loads ``env.imitation_adapter()`` when ``--imitate`` is set.
-- ``update_actor_critic`` produces a finite imitation loss when the adapter's
+- PPO loads ``env.imitation_projector()`` when ``--imitate`` is set.
+- ``update_actor_critic`` produces a finite imitation loss when the projector's
   mask is non-empty, and zero when the mask is empty.
 - PPO raises a clear error when ``--imitate`` is set against an env that does
-  not implement ``imitation_adapter()``.
+  not implement ``imitation_projector()``.
 """
 
 from argparse import Namespace
@@ -24,8 +24,8 @@ CARTPOLE_OBS_DIM = 5
 CARTPOLE_ACT_DIM = 1
 
 
-class _StubAdapter:
-    """Minimal adapter for tests: slice obs[:, :expert_obs_dim], mask sin(obs[:,0])>0."""
+class _StubProjector:
+    """Minimal projector for tests: slice obs[:, :expert_obs_dim], mask sin(obs[:,0])>0."""
 
     def __init__(self, expert_obs_dim: int, action_indices: list[int], mask_thresh: float = 0.0):
         self._expert_obs_dim = expert_obs_dim
@@ -42,8 +42,8 @@ class _StubAdapter:
         )
 
 
-class _AlwaysEmptyAdapter:
-    """Adapter whose mask is always all-False; exercises the fast-path branch."""
+class _AlwaysEmptyProjector:
+    """Projector whose mask is always all-False; exercises the fast-path branch."""
 
     def __init__(self, expert_obs_dim: int, action_indices: list[int]):
         self._expert_obs_dim = expert_obs_dim
@@ -105,14 +105,14 @@ def _cartpole_factory():
     return partial(env_cls, path_to_yaml=None)
 
 
-def _attach_adapter(env_cls, adapter):
-    """Patch a class-level ``imitation_adapter()`` returning ``adapter``."""
-    env_cls.imitation_adapter = lambda self, _a=adapter: _a
+def _attach_projector(env_cls, projector):
+    """Patch a class-level ``imitation_projector()`` returning ``projector``."""
+    env_cls.imitation_projector = lambda self, _p=projector: _p
 
 
-def _detach_adapter(env_cls):
-    if "imitation_adapter" in env_cls.__dict__:
-        delattr(env_cls, "imitation_adapter")
+def _detach_projector(env_cls):
+    if "imitation_projector" in env_cls.__dict__:
+        delattr(env_cls, "imitation_projector")
 
 
 def _synthetic_batch(ppo, batch_size=8):
@@ -130,19 +130,19 @@ def _set_optimizers(ppo):
     ppo.critic_optimizer = optim.Adam(ppo.critic.parameters(), lr=ppo.lr, eps=ppo.eps)
 
 
-def test_adapter_drives_imitation_loss(tmp_path):
-    """Adapter with a non-empty mask produces a finite, non-zero imitation loss."""
+def test_projector_drives_imitation_loss(tmp_path):
+    """Projector with a non-empty mask produces a finite, non-zero imitation loss."""
     expert_path = tmp_path / "expert.pt"
     _save_dummy_expert(expert_path, expert_obs_dim=3, expert_action_dim=CARTPOLE_ACT_DIM)
 
     env_cls, _ = ENVIRONMENTS["cartpole"]
-    adapter = _StubAdapter(expert_obs_dim=3, action_indices=[0])
-    _attach_adapter(env_cls, adapter)
+    projector = _StubProjector(expert_obs_dim=3, action_indices=[0])
+    _attach_projector(env_cls, projector)
     try:
         args = _train_args(tmp_path, imitate_path=str(expert_path))
         ppo = PPO(_cartpole_factory(), args)
 
-        assert ppo.imitation_adapter is adapter
+        assert ppo.imitation_projector is projector
         assert ppo.base_policy is not None
 
         _set_optimizers(ppo)
@@ -157,16 +157,16 @@ def test_adapter_drives_imitation_loss(tmp_path):
         assert torch.isfinite(imitation_loss)
         assert imitation_loss.item() > 0.0
     finally:
-        _detach_adapter(env_cls)
+        _detach_projector(env_cls)
 
 
 def test_empty_mask_yields_zero_loss(tmp_path):
-    """Adapter that masks out every sample short-circuits to zero loss."""
+    """Projector that masks out every sample short-circuits to zero loss."""
     expert_path = tmp_path / "expert.pt"
     _save_dummy_expert(expert_path, expert_obs_dim=3, expert_action_dim=CARTPOLE_ACT_DIM)
 
     env_cls, _ = ENVIRONMENTS["cartpole"]
-    _attach_adapter(env_cls, _AlwaysEmptyAdapter(expert_obs_dim=3, action_indices=[0]))
+    _attach_projector(env_cls, _AlwaysEmptyProjector(expert_obs_dim=3, action_indices=[0]))
     try:
         args = _train_args(tmp_path, imitate_path=str(expert_path))
         ppo = PPO(_cartpole_factory(), args)
@@ -179,17 +179,17 @@ def test_empty_mask_yields_zero_loss(tmp_path):
         assert torch.isfinite(imitation_loss)
         assert imitation_loss.item() == 0.0
     finally:
-        _detach_adapter(env_cls)
+        _detach_projector(env_cls)
 
 
-def test_missing_adapter_raises(tmp_path):
-    """--imitate against an env without imitation_adapter() raises a clear error."""
+def test_missing_projector_raises(tmp_path):
+    """--imitate against an env without imitation_projector() raises a clear error."""
     expert_path = tmp_path / "expert.pt"
     _save_dummy_expert(expert_path, expert_obs_dim=3, expert_action_dim=CARTPOLE_ACT_DIM)
 
     env_cls, _ = ENVIRONMENTS["cartpole"]
-    _detach_adapter(env_cls)  # ensure no leftover patch from another test
+    _detach_projector(env_cls)  # ensure no leftover patch from another test
 
     args = _train_args(tmp_path, imitate_path=str(expert_path))
-    with pytest.raises(ValueError, match="imitation_adapter"):
+    with pytest.raises(ValueError, match="imitation_projector"):
         PPO(_cartpole_factory(), args)

@@ -109,16 +109,16 @@ class PPO:
                 critic.obs_std = policy.obs_std
 
         base_policy = None
-        imitation_adapter = None
+        imitation_projector = None
         if args.imitate:
             base_policy = torch.load(args.imitate, weights_only=False)
             base_policy.eval()
-            adapter_factory = getattr(env_instance, "imitation_adapter", None)
-            imitation_adapter = adapter_factory() if callable(adapter_factory) else None
-            if imitation_adapter is None:
+            projector_factory = getattr(env_instance, "imitation_projector", None)
+            imitation_projector = projector_factory() if callable(projector_factory) else None
+            if imitation_projector is None:
                 raise ValueError(
                     f"--imitate was passed but env {type(env_instance).__name__} does "
-                    "not implement imitation_adapter(); cannot construct expert query."
+                    "not implement imitation_projector(); cannot construct expert query."
                 )
 
         # Device setup (from args or auto-detect)
@@ -153,7 +153,7 @@ class PPO:
         self.policy = policy
         self.critic = critic
         self.base_policy = base_policy
-        self.imitation_adapter = imitation_adapter
+        self.imitation_projector = imitation_projector
 
         # Store env_fn for later use
         self.env_fn = env_fn
@@ -359,8 +359,8 @@ class PPO:
 
         # imitation loss
         imitation_loss = torch.zeros_like(actor_loss)
-        if self.imitation_adapter is not None:
-            query = self.imitation_adapter(obs_batch)
+        if self.imitation_projector is not None:
+            query = self.imitation_projector(obs_batch)
             if query.sample_mask.any():
                 with torch.no_grad():
                     target = self.base_policy(query.expert_obs)

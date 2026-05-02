@@ -1,9 +1,9 @@
-"""Contract for env-owned imitation-loss adapters.
+"""Contract for env-owned imitation-loss projectors.
 
 PPO needs to ask "for this batch of policy obs, what should I feed an expert and
 what should I compare its output against?" without knowing anything about the
-env's obs/action layout. The env answers via an :class:`ImitationAdapter` it
-returns from ``env.imitation_adapter()``.
+env's obs/action layout. The env answers via an :class:`ImitationProjector` it
+returns from ``env.imitation_projector()``.
 """
 
 from dataclasses import dataclass
@@ -31,8 +31,9 @@ class ImitationQuery:
     action_indices: torch.Tensor
 
 
-class ImitationAdapter(Protocol):
-    """Translator from policy obs to an expert query.
+class ImitationProjector(Protocol):
+    """Projects policy obs into the expert's input space and selects which
+    samples / action dims contribute to the imitation loss.
 
     Implementations are stateless w.r.t. env time: they capture obs-layout
     constants at construction and operate purely on the obs batch tensor.
