@@ -109,8 +109,17 @@ class PPO:
                 critic.obs_std = policy.obs_std
 
         base_policy = None
+        imitation_projector = None
         if args.imitate:
             base_policy = torch.load(args.imitate, weights_only=False)
+            base_policy.eval()
+            projector_factory = getattr(env_instance, "imitation_projector", None)
+            imitation_projector = projector_factory() if callable(projector_factory) else None
+            if imitation_projector is None:
+                raise ValueError(
+                    f"--imitate was passed but env {type(env_instance).__name__} does "
+                    "not implement imitation_projector(); cannot construct expert query."
+                )
 
         # Device setup (from args or auto-detect)
         device_arg = getattr(args, "device", "auto")
@@ -144,6 +153,7 @@ class PPO:
         self.policy = policy
         self.critic = critic
         self.base_policy = base_policy
+        self.imitation_projector = imitation_projector
 
         # Store env_fn for later use
         self.env_fn = env_fn
@@ -348,10 +358,14 @@ class PPO:
             mirror_loss = torch.zeros_like(actor_loss)
 
         # imitation loss
-        if self.base_policy is not None:
-            imitation_loss = (self.base_policy(obs_batch) - deterministic_actions).pow(2).mean()
-        else:
-            imitation_loss = torch.zeros_like(actor_loss)
+        imitation_loss = torch.zeros_like(actor_loss)
+        if self.imitation_projector is not None:
+            query = self.imitation_projector(obs_batch)
+            if query.sample_mask.any():
+                with torch.no_grad():
+                    target = self.base_policy(query.expert_obs)
+                pred = deterministic_actions[query.sample_mask][:, query.action_indices]
+                imitation_loss = (pred - target).pow(2).mean()
 
         # Calculate approximate form of reverse KL Divergence for early stopping
         # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
