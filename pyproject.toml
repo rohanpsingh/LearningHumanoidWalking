@@ -10,6 +10,7 @@ dependencies = [
     "imageio[ffmpeg]>=2.37.0",
     "intel-openmp>=2025.2.1",
     "mujoco==3.4.0",
+    "pandas>=2.0",
     "ray==2.40.0",
     "tensorboard>=2.20.0",
     "torch==2.5.1",
