@@ -77,6 +77,12 @@ class MimicTask(BaseTask):
         self.mimic_period = 1
         self.gait_period = 1
 
+        # Bipedal gait timing (seconds). Exposed as attributes so the env's
+        # leg-imitation projector can derive its phase window from them.
+        self._swing_duration = 0.4
+        self._stance_duration = 0.1
+        self._total_duration = 2 * (self._swing_duration + self._stance_duration)
+
         # Tracking errors (filled in calc_reward; consumed by done())
         self.root_track_error = 0.0
         self.body_track_error = 0.0
@@ -261,10 +267,7 @@ class MimicTask(BaseTask):
         )
 
         # Bipedal gait clock (independent of mocap clock)
-        swing_duration = 0.4
-        stance_duration = 0.1
-        total_duration = 2 * (swing_duration + stance_duration)
-        self.gait_period = float(np.floor(total_duration * (1 / self._control_dt)))
+        self.gait_period = float(np.floor(self._total_duration * (1 / self._control_dt)))
         self.gait_phase = int(np.random.randint(0, int(self.gait_period)))
 
     def _current_idx(self) -> int:

@@ -15,10 +15,12 @@ import contextlib
 import os
 
 import numpy as np
+import torch
 import transforms3d as tf3
 
 from envs.common import robot_interface
 from envs.common.utils import get_project_root
+from rl.algos.imitation import ImitationQuery
 from robots.robot_base import RobotBase
 from tasks.mimic_task import MimicTask
 
@@ -316,3 +318,126 @@ class H1MimicEnv(H1BaseEnv):
         self.viewer.cam.distance = 8
         self.viewer.cam.lookat[2] = 1.5
         self.viewer.cam.lookat[0] = 1.0
+
+    def imitation_projector(self):
+        """Build the leg-imitation projector for the H1 walking expert.
+
+        Slices the 19-joint mimic obs down to the 10-leg walker layout,
+        appends a synthetic walker command (INPLACE + zero velocity ref),
+        and masks samples to those whose gait phase falls within one full
+        leg swing+stance window.
+        """
+        n_legs = len(self.leg_names)
+        n_act = len(self.actuators)
+
+        # Per-timestep mimic obs layout (must match _get_robot_state +
+        # _get_external_state above):
+        #   [0..5)   root_r, root_p, root_ang_vel(3)
+        #   [5..5+n_act)            motor_pos
+        #   [5+n_act..5+2*n_act)    motor_vel
+        #   [5+2*n_act..5+3*n_act)  motor_tau
+        #   [robot_state_len..)     mimic_clock(2), gait_clock(2), obj_pos(3), obj_rot(6)
+        robot_state_len = self._get_robot_state_len()
+        motor_pos_start = 5
+        motor_vel_start = motor_pos_start + n_act
+        motor_tau_start = motor_pos_start + 2 * n_act
+        gait_clock_start = robot_state_len + 2  # past mimic_clock
+
+        # Indices into one mimic timestep that map to one walker timestep.
+        # Walker order: root(5), legs_pos(10), legs_vel(10), legs_tau(10), gait_clock(2).
+        per_ts_indices = (
+            list(range(0, 5))
+            + list(range(motor_pos_start, motor_pos_start + n_legs))
+            + list(range(motor_vel_start, motor_vel_start + n_legs))
+            + list(range(motor_tau_start, motor_tau_start + n_legs))
+            + list(range(gait_clock_start, gait_clock_start + 2))
+        )
+
+        # INPLACE mode + zero velocity reference: tells the walker to "walk in
+        # place" for the leg-imitation signal during the box-manip task.
+        inplace_command = np.concatenate([np.array([0.0, 1.0, 0.0]), np.zeros(3)])
+
+        # Imitation phase window: one full leg swing + half-stance buffer on
+        # either side, derived from the task's gait timing.
+        s = self.task._stance_duration
+        w = self.task._swing_duration
+        t = self.task._total_duration
+        phi_lo = (s / 2) / t
+        phi_hi = (s / 2 + w + s / 2) / t
+
+        return _MimicLegImitationProjector(
+            per_ts_indices=per_ts_indices,
+            per_ts_mimic_dim=self.base_obs_len,
+            history_len=self.history_len,
+            gait_clock_offset=gait_clock_start,
+            synthetic_command=inplace_command,
+            action_indices=np.arange(n_legs, dtype=np.int64),
+            phi_window=(phi_lo, phi_hi),
+        )
+
+
+class _MimicLegImitationProjector:
+    """Projects mimic obs into the walker-expert obs space.
+
+    The projector is layout-stateless: it captures all index/shape constants
+    at construction and operates purely on the obs batch tensor. Both envs
+    share the same per-step gait clock layout (sin/cos of `2*pi*phi`), so we
+    read the current gait phase out of the most-recent history chunk
+    (chunk 0 — `appendleft` puts the latest state at the front).
+    """
+
+    def __init__(
+        self,
+        per_ts_indices: list[int],
+        per_ts_mimic_dim: int,
+        history_len: int,
+        gait_clock_offset: int,
+        synthetic_command: np.ndarray,
+        action_indices: np.ndarray,
+        phi_window: tuple[float, float],
+    ):
+        self._per_ts_mimic_dim = per_ts_mimic_dim
+        self._history_len = history_len
+        self._phi_lo, self._phi_hi = phi_window
+
+        # Absolute index of the gait_clock sin/cos in the latest chunk.
+        self._gait_sin_idx = gait_clock_offset
+        self._gait_cos_idx = gait_clock_offset + 1
+
+        # Pre-build the projection index list for every chunk in the history.
+        per_ts = torch.tensor(per_ts_indices, dtype=torch.long)
+        offsets = torch.arange(history_len, dtype=torch.long) * per_ts_mimic_dim
+        self._select_idx = (offsets[:, None] + per_ts[None, :]).reshape(-1)
+
+        cmd = torch.tensor(synthetic_command, dtype=torch.float32)
+        self._synthetic_command = cmd.repeat(history_len)
+
+        self._action_indices = torch.tensor(action_indices, dtype=torch.long)
+
+    def __call__(self, obs_batch: torch.Tensor) -> ImitationQuery:
+        device = obs_batch.device
+
+        # Mask: gait phase of the most recent timestep within the imitation window.
+        sin_phi = obs_batch[:, self._gait_sin_idx]
+        cos_phi = obs_batch[:, self._gait_cos_idx]
+        phi = torch.atan2(sin_phi, cos_phi) / (2 * torch.pi)
+        phi = phi % 1.0
+        sample_mask = (phi >= self._phi_lo) & (phi <= self._phi_hi)
+
+        select_idx = self._select_idx.to(device)
+        active = obs_batch[sample_mask]
+        sliced = active.index_select(dim=1, index=select_idx)
+        # Interleave per-timestep walker chunks with appended command per chunk.
+        n_active = sliced.shape[0]
+        per_ts_walker_minus_cmd = sliced.shape[1] // self._history_len
+        cmd_per_ts = self._synthetic_command.shape[0] // self._history_len
+        sliced = sliced.reshape(n_active, self._history_len, per_ts_walker_minus_cmd)
+        cmd_chunks = self._synthetic_command.to(device).reshape(self._history_len, cmd_per_ts)
+        cmd_chunks = cmd_chunks.unsqueeze(0).expand(n_active, -1, -1)
+        expert_obs = torch.cat([sliced, cmd_chunks], dim=2).reshape(n_active, -1)
+
+        return ImitationQuery(
+            expert_obs=expert_obs,
+            sample_mask=sample_mask,
+            action_indices=self._action_indices.to(device),
+        )
